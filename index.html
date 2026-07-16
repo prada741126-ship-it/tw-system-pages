@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台灣版整合系統</title>
+<style>/* variables.css — 所有颜色、字体、间距 */
+:root {
+  --bg-base: #f5f7fa;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f0f2f5;
+  --text-primary: #1a1a2e;
+  --text-secondary: #6c757d;
+  --text-muted: #adb5bd;
+  --color-primary: #2b6cb0;
+  --color-primary-light: #4299e1;
+  --color-primary-dark: #2c5282;
+  --color-accent: #0d9488;
+  --color-gold: #c9a84c;
+  --color-danger: #e53e3e;
+  --color-danger-light: #fc8181;
+  --color-warning: #d69e2e;
+  --color-success: #38a169;
+  --color-success-light: #68d391;
+  --color-info: #3182ce;
+  --border-color: #e2e8f0;
+  --border-strong: #cbd5e0;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft JhengHei', sans-serif;
+  --font-mono: 'SF Mono', 'Consolas', monospace;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 28px;
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+}
+
+/* base.css — reset + 基础元素 */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: var(--font-size-md); }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+button { cursor: pointer; font-family: inherit; }
+input, select, textarea { font-family: inherit; font-size: inherit; }
+table { border-collapse: collapse; width: 100%; }
+a { color: var(--color-primary); text-decoration: none; }
+.hidden { display: none !important; }
+.text-success { color: var(--color-success); }
+.text-warning { color: var(--color-warning); }
+.text-danger { color: var(--color-danger); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* layout.css — 布局框架 */
+#app { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 220px; background: var(--bg-surface); border-right: 1px solid var(--border-color);
+  padding: var(--spacing-md); flex-shrink: 0; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+}
+.sidebar-brand { padding: var(--spacing-md) 0; text-align: center; border-bottom: 1px solid var(--border-color); margin-bottom: var(--spacing-md); }
+.sidebar-brand .brand-icon { font-size: 32px; color: var(--color-gold); }
+.sidebar-brand .brand-title { font-size: var(--font-size-lg); font-weight: 700; margin-top: var(--spacing-xs); }
+.sidebar-brand .brand-sub { font-size: var(--font-size-sm); color: var(--text-secondary); }
+.nav-list { list-style: none; }
+.nav-item {
+  display: flex; align-items: center; gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md); border-radius: var(--radius-md);
+  cursor: pointer; transition: background var(--transition-fast); margin-bottom: 2px;
+  color: var(--text-secondary);
+}
+.nav-item:hover { background: var(--bg-hover); }
+.nav-item.active { background: var(--color-primary); color: white; }
+.nav-item .nav-icon { font-size: 18px; }
+.nav-item .nav-label { font-size: var(--font-size-md); }
+.main-content { flex: 1; padding: var(--spacing-lg); overflow-x: auto; }
+.page-section { display: none; }
+.page-section.active { display: block; }
+.topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-lg); }
+.topbar h2 { font-size: var(--font-size-xl); }
+
+/* components.css — 共用组件 */
+.btn {
+  display: inline-flex; align-items: center; gap: var(--spacing-xs);
+  padding: 8px 16px; border: none; border-radius: var(--radius-md);
+  font-size: var(--font-size-md); font-weight: 500; transition: all var(--transition-fast);
+}
+.btn-primary { background: var(--color-primary); color: white; }
+.btn-primary:hover { background: var(--color-primary-dark); }
+.btn-secondary { background: var(--bg-hover); color: var(--text-primary); }
+.btn-danger { background: var(--color-danger); color: white; }
+.btn-danger:hover { background: #c53030; }
+.btn-warning { background: var(--color-warning); color: white; }
+.btn-sm { padding: 4px 10px; font-size: var(--font-size-sm); border: 1px solid var(--border-color); background: var(--bg-surface); border-radius: var(--radius-sm); }
+.btn-sm:hover { background: var(--bg-hover); }
+.btn-sm.btn-danger { background: var(--color-danger); color: white; border: none; }
+.card { background: var(--bg-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: var(--spacing-lg); margin-bottom: var(--spacing-md); }
+.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-md); }
+.card-header h3 { font-size: var(--font-size-lg); }
+.card-header h4 { font-size: var(--font-size-md); color: var(--text-secondary); }
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--spacing-md); margin-bottom: var(--spacing-lg); }
+.kpi-card { background: var(--bg-surface); border-radius: var(--radius-lg); padding: var(--spacing-md); box-shadow: var(--shadow-sm); border-left: 4px solid var(--color-primary); }
+.kpi-card.kpi-warning { border-left-color: var(--color-warning); }
+.kpi-card.kpi-highlight { border-left-color: var(--color-gold); }
+.kpi-card.kpi-active { border-left-color: var(--color-success); }
+.kpi-label { font-size: var(--font-size-sm); color: var(--text-secondary); }
+.kpi-value { font-size: var(--font-size-2xl); font-weight: 700; margin-top: var(--spacing-xs); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+.badge-pending { background: #fff3cd; color: #856404; }
+.badge-confirmed { background: #d1ecf1; color: #0c5460; }
+.badge-info { background: #d4edda; color: #155724; }
+.badge-success { background: #d4edda; color: #155724; }
+.badge-danger { background: #f8d7da; color: #721c24; }
+.badge-warning { background: #fff3cd; color: #856404; }
+.empty-state { text-align: center; padding: var(--spacing-xl); color: var(--text-muted); }
+.summary-row { display: flex; gap: var(--spacing-lg); padding: var(--spacing-md) 0; font-weight: 600; border-top: 2px solid var(--border-color); margin-top: var(--spacing-sm); }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--spacing-md); margin-bottom: var(--spacing-md); }
+.summary-item { background: var(--bg-hover); padding: var(--spacing-md); border-radius: var(--radius-md); }
+.summary-item label { display: block; font-size: var(--font-size-sm); color: var(--text-secondary); }
+.summary-item span { font-size: var(--font-size-lg); font-weight: 600; }
+.quota-bar { height: 8px; background: var(--border-color); border-radius: 4px; overflow: hidden; min-width: 100px; }
+.quota-fill { height: 100%; background: var(--color-success); transition: width var(--transition-normal); }
+.filter-bar { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-md); }
+.alert-card { border-left: 4px solid var(--color-warning); }
+.toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; }
+.toast { padding: 12px 20px; border-radius: var(--radius-md); margin-top: 8px; color: white; animation: slideIn 0.3s ease; }
+.toast-info { background: var(--color-info); }
+.toast-success { background: var(--color-success); }
+.toast-error { background: var(--color-danger); }
+.toast-warning { background: var(--color-warning); }
+.toast-fade-out { opacity: 0; transition: opacity 0.3s; }
+@keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.trip-card, .agent-card { border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: var(--spacing-md); margin-bottom: var(--spacing-md); }
+.trip-card-header, .agent-card-header { display: flex; gap: var(--spacing-md); margin-bottom: var(--spacing-sm); font-weight: 600; }
+.trip-card-stats, .agent-stats { display: flex; gap: var(--spacing-md); color: var(--text-secondary); font-size: var(--font-size-sm); margin-bottom: var(--spacing-sm); }
+.quota-section { margin: var(--spacing-sm) 0; }
+.quota-info { display: flex; gap: var(--spacing-md); font-size: var(--font-size-sm); margin-bottom: var(--spacing-xs); }
+.month-group { margin-bottom: var(--spacing-md); }
+.month-header { display: flex; align-items: center; gap: var(--spacing-md); padding: var(--spacing-md); background: var(--bg-hover); border-radius: var(--radius-md); cursor: pointer; }
+.month-title { font-weight: 700; font-size: var(--font-size-lg); }
+.month-stats { flex: 1; color: var(--text-secondary); }
+.month-content { padding: var(--spacing-md) 0; }
+.detail-section { margin-bottom: var(--spacing-md); }
+.detail-section h4 { margin-bottom: var(--spacing-sm); color: var(--color-primary); }
+
+/* table.css — 表格样式 */
+.data-table { font-size: var(--font-size-sm); }
+.data-table th {
+  background: var(--bg-hover); text-align: left; padding: 10px 12px;
+  font-weight: 600; color: var(--text-secondary); border-bottom: 2px solid var(--border-color);
+  white-space: nowrap;
+}
+.data-table td { padding: 8px 12px; border-bottom: 1px solid var(--border-color); }
+.data-table tr:hover td { background: var(--bg-hover); }
+.data-table.compact th, .data-table.compact td { padding: 6px 8px; font-size: 13px; }
+.data-table tbody tr:nth-child(even) td { background: rgba(0,0,0,0.015); }
+.table-wrapper { overflow-x: auto; }
+
+/* form.css — 表单样式 */
+.form-input {
+  padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  font-size: var(--font-size-md); width: 100%; transition: border var(--transition-fast);
+}
+.form-input:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(43,108,176,0.1); }
+.form-input.compact { padding: 4px 8px; width: auto; }
+.form-group { margin-bottom: var(--spacing-md); }
+.form-group label { display: block; margin-bottom: var(--spacing-xs); font-size: var(--font-size-sm); color: var(--text-secondary); }
+.form-row { display: flex; gap: var(--spacing-md); }
+.form-row .form-group { flex: 1; }
+.expense-row { display: flex; gap: var(--spacing-sm); align-items: center; margin-bottom: var(--spacing-xs); }
+.expense-row .form-input { flex: 1; }
+
+/* modal.css — 弹窗样式 */
+#modal-overlay {
+  display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;
+}
+#modal-overlay.active { display: flex; }
+.modal-box {
+  background: var(--bg-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; padding: var(--spacing-lg);
+}
+.modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-md); }
+.modal-header h3 { font-size: var(--font-size-lg); }
+.modal-close { background: none; border: none; font-size: 24px; color: var(--text-muted); cursor: pointer; }
+
+/* login.css — 登录画面 */
+#login-overlay {
+  display: flex; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  align-items: center; justify-content: center; z-index: 2000;
+}
+.login-box {
+  background: rgba(255,255,255,0.08); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: var(--radius-lg); padding: var(--spacing-xl); width: 360px; text-align: center;
+}
+.login-box .login-icon { font-size: 48px; color: var(--color-gold); margin-bottom: var(--spacing-md); }
+.login-box h1 { color: white; font-size: var(--font-size-xl); margin-bottom: var(--spacing-xs); }
+.login-box .login-sub { color: rgba(255,255,255,0.6); font-size: var(--font-size-sm); margin-bottom: var(--spacing-lg); }
+.login-box input {
+  width: 100%; padding: 12px 16px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+  border-radius: var(--radius-md); color: white; font-size: var(--font-size-md); margin-bottom: var(--spacing-md);
+}
+.login-box input::placeholder { color: rgba(255,255,255,0.4); }
+.login-box input:focus { outline: none; border-color: var(--color-gold); }
+.login-box button {
+  width: 100%; padding: 12px; background: var(--color-gold); color: #1a1a2e; border: none;
+  border-radius: var(--radius-md); font-size: var(--font-size-lg); font-weight: 600;
+}
+.login-box.shake { animation: shake 0.4s; }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
+
+/* responsive.css — 响应式 */
+@media (max-width: 768px) {
+  #app { flex-direction: column; }
+  .sidebar { width: 100%; height: auto; position: relative; border-right: none; border-bottom: 1px solid var(--border-color); }
+  .nav-list { display: flex; overflow-x: auto; }
+  .nav-item { white-space: nowrap; }
+  .main-content { padding: var(--spacing-md); }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .form-row { flex-direction: column; }
+  .summary-row { flex-direction: column; gap: var(--spacing-xs); }
+}
+
+/* print.css — 打印样式 */
+@media print {
+  .sidebar, .topbar, .btn, .btn-sm, .filter-bar, .paginator { display: none !important; }
+  .main-content { padding: 0; }
+  .card { box-shadow: none; border: 1px solid var(--border-strong); }
+  body { background: white; color: black; }
+}
+
+/* pages.css — 页面专属样式 */
+.paginator { display: flex; align-items: center; justify-content: space-between; padding: var(--spacing-sm) 0; }
+.paginator-info { font-size: var(--font-size-sm); color: var(--text-secondary); }
+.paginator-btns { display: flex; gap: var(--spacing-xs); }
+.paginator-btns button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+</style>
+</head>
+<body>
+
+<!-- 登入畫面 -->
+<div id="login-overlay">
+  <div class="login-box">
+    <div class="login-icon">♠</div>
+    <h1>授 權 驗 證</h1>
+    <div class="login-sub">博盈國際會 · 台灣版整合管理</div>
+    <input type="password" id="login-pwd" placeholder="請輸入密碼" onkeydown="if(event.key==='Enter')handleLogin()">
+    <button onclick="handleLogin()">進 入 系 統</button>
+  </div>
+</div>
+
+<!-- 主應用 -->
+<div id="app" style="display:none;">
+  <!-- 側邊欄 -->
+  <div class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon">♠</div>
+      <div class="brand-title">博盈國際會</div>
+      <div class="brand-sub">台灣版 v1.0</div>
+    </div>
+    <ul class="nav-list" id="nav-list"></ul>
+  </div>
+
+  <!-- 主內容區 -->
+  <div class="main-content">
+    <div class="topbar">
+      <h2 id="topbar-title">總覽</h2>
+      <div id="sync-status"></div>
+    </div>
+    <div id="page-overview" class="page-section active"></div>
+    <div id="page-pending" class="page-section"></div>
+    <div id="page-member" class="page-section"></div>
+    <div id="page-room" class="page-section"></div>
+    <div id="page-agent" class="page-section"></div>
+    <div id="page-shareholder" class="page-section"></div>
+    <div id="page-members-mgmt" class="page-section"></div>
+    <div id="page-history" class="page-section"></div>
+    <div id="page-settings" class="page-section"></div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div id="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="modal-title"></h3>
+      <button class="modal-close" onclick="Modal.close()">×</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast-container" class="toast-container"></div>
+
+<script src="app.js?v=1784230850997"></script>
+</body>
+</html>
