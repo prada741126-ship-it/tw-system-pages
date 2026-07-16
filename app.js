@@ -15,7 +15,7 @@ var APP = {
   SYSTEM_EN:     'BOYING INTERNATIONAL CLUB',
   LOGIN_TITLE:   '授 權 驗 證',
   LOGO_CHAR:     '\u2660',
-  PWD_HASH:      '8204868322789a563871ffa6e828a1f096b4c4cec66706ee848283fae65551d6',
+  PWD_HASH:      '2926a2731f4b312c08982cacf8061eb14bf65c1a87cc5d70e864e079c6220731',
 };
 
 // ============================================================================
