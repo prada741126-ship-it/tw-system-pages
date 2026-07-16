@@ -57,16 +57,16 @@ var STORAGE_KEYS = {
 };
 
 // ============================================================================
-// Firebase 配置 (独立专案 tw-booking-app)
+// Firebase 配置 (共用 macau-app 專案, 獨立路徑 taiwan_data/)
 // ============================================================================
 var TW_FIREBASE_CONFIG = {
-  apiKey:             'AIzaSyBaM6oDY3JXUJs4_kAydcNKLnWLp6ksqQ',
-  authDomain:         'tw-booking-app.firebaseapp.com',
-  databaseURL:        'https://tw-booking-app-default-rtdb.asia-southeast1.firebasedatabase.app',
-  projectId:          'tw-booking-app',
-  storageBucket:      'tw-booking-app.firebasestorage.app',
-  messagingSenderId:  '853866641126',
-  appId:              '1:853866641126:web:fda445e2664591a6a36d27',
+  apiKey:             'AIzaSyC3NKqEVUpL-9WYvun7pBbJe8P7T8o4Y74',
+  authDomain:         'macau-app.firebaseapp.com',
+  databaseURL:        'https://macau-app-default-rtdb.asia-southeast1.firebasedatabase.app',
+  projectId:          'macau-app',
+  storageBucket:      'macau-app.firebasestorage.app',
+  messagingSenderId:  '638116698004',
+  appId:              '1:638116698004:web:1dcbca626fa229e11f6181',
 };
 
 var TW_FIREBASE_SDK_VERSION = '9.23.0';
