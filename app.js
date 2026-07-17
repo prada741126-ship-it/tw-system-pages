@@ -2763,7 +2763,8 @@ var AgentPage = (function() {
     var html = '';
 
     html += '<div class="card">';
-    html += '<div class="card-header"><h3>代理帳務</h3></div>';
+    html += '<div class="card-header"><h3>代理帳務</h3>';
+    html += '<button class="btn btn-primary" onclick="AgentPage.showAdd()">+ 新增代理</button></div>';
 
     if (agents.length === 0) {
       html += '<div class="empty-state">無代理資料</div>';
@@ -2845,7 +2846,32 @@ var AgentPage = (function() {
     if (container) container.innerHTML = html;
   }
 
-  return { render: render };
+  return { render: render, showAdd: showAdd, save: save };
+
+  function showAdd() {
+    var shareholders = Shareholders.getAll();
+    if (shareholders.length === 0) {
+      Toast.error('請先在股東頁面新增股東');
+      return;
+    }
+    var html = '<div class="form-group"><label>代理名稱</label><input type="text" id="ag-name" class="form-input"></div>';
+    html += '<div class="form-group"><label>所屬股東</label>';
+    html += '<select id="ag-sh" class="form-input">';
+    shareholders.forEach(function(sh) { html += '<option value="' + sh.id + '">' + sh.name + '</option>'; });
+    html += '</select></div>';
+    html += '<div style="text-align:right;margin-top:16px;"><button class="btn btn-primary" onclick="AgentPage.save()">儲存</button></div>';
+    Modal.open('新增代理', html);
+  }
+
+  function save() {
+    var name = document.getElementById('ag-name').value;
+    var shId = document.getElementById('ag-sh').value;
+    if (!name) { Toast.error('代理名稱必填'); return; }
+    Agents.create({ name: name, shareholderId: shId });
+    Modal.close();
+    Toast.success('代理已新增');
+    render();
+  }
 })();
 
 
@@ -2864,7 +2890,10 @@ var ShareholderPage = (function() {
     var html = '';
     html += '<div class="card">';
     html += '<div class="card-header"><h3>股東分潤</h3>';
+    html += '<div style="display:flex;gap:8px;align-items:center;">';
     html += '<input type="month" id="sh-month" class="form-input" style="width:auto;" value="' + currentMonth + '" onchange="ShareholderPage.changeMonth(this.value)">';
+    html += '<button class="btn btn-primary" onclick="ShareholderPage.showAdd()">+ 新增股東</button>';
+    html += '</div>';
     html += '</div>';
 
     // 计算总洗码和总盈利
@@ -2975,6 +3004,23 @@ var ShareholderPage = (function() {
 
   function changeMonth(month) { render(); }
 
+  function showAdd() {
+    var html = '<div class="form-group"><label>股東名稱</label><input type="text" id="sh-name" class="form-input"></div>';
+    html += '<div class="form-group"><label>持股數</label><input type="number" step="1" id="sh-shares" class="form-input" value="1"></div>';
+    html += '<div style="text-align:right;margin-top:16px;"><button class="btn btn-primary" onclick="ShareholderPage.save()">儲存</button></div>';
+    Modal.open('新增股東', html);
+  }
+
+  function save() {
+    var name = document.getElementById('sh-name').value;
+    var shares = parseInt(document.getElementById('sh-shares').value) || 0;
+    if (!name) { Toast.error('股東名稱必填'); return; }
+    Shareholders.create({ name: name, shares: shares });
+    Modal.close();
+    Toast.success('股東已新增');
+    render();
+  }
+
   function showAddExtra() {
     var month = document.getElementById('sh-month').value;
     var html = '<div class="form-group"><label>描述</label><input type="text" id="ei-desc" class="form-input"></div>';
@@ -3001,7 +3047,7 @@ var ShareholderPage = (function() {
     render();
   }
 
-  return { render: render, changeMonth: changeMonth, showAddExtra: showAddExtra, saveExtra: saveExtra, delExtra: delExtra };
+  return { render: render, changeMonth: changeMonth, showAdd: showAdd, save: save, showAddExtra: showAddExtra, saveExtra: saveExtra, delExtra: delExtra };
 })();
 
 
