@@ -2927,7 +2927,7 @@ var AgentPage = (function() {
         var agentTxs = mtxs.filter(function(t) { return t.agentId === agent.id; });
         var agentBookings = bookings.filter(function(b) { return b.agentId === agent.id; });
         var quota = calcAgentQuota(agent.id, mtxs, bookings);
-        var totalSettle = agentTxs.reduce(function(s, t) { return s + (t.settlementAmount || 0); }, 0);
+        var totalSettle = agentTxs.reduce(function(s, t) { return s + (t.totalSettlement || 0); }, 0);
         var pct = quota.totalThreshold > 0 ? Math.min(100, (quota.totalWashRaw / quota.totalThreshold) * 100) : 0;
 
         html += '<div class="agent-card">';
@@ -2955,17 +2955,21 @@ var AgentPage = (function() {
 
         // 会员明细
         if (agentTxs.length > 0) {
+          var halls = Settings.getVipHalls();
           html += '<details><summary>會員帳務明細</summary>';
           html += '<table class="data-table compact"><thead><tr>';
           html += '<th>會員</th><th>廳</th><th>洗碼</th><th>交收金額</th>';
           html += '</tr></thead><tbody>';
           agentTxs.forEach(function(tx) {
             var m = Members.getById(tx.memberId);
+            var hall = halls.find(function(h) { return h.id === tx.vipHallId; });
+            var hallName = hall ? hall.name : (tx.vipHallId || '');
+            var settleNT = (tx.totalSettlement || 0) * 10000;
             html += '<tr>';
             html += '<td>' + (m ? m.name : tx.memberId) + '</td>';
-            html += '<td>' + (tx.vipHallId || '') + '</td>';
+            html += '<td>' + hallName + '</td>';
             html += '<td>' + (tx.washCode || 0) + '</td>';
-            html += '<td>' + Math.round(tx.settlementAmount || 0).toLocaleString() + '</td>';
+            html += '<td>' + Math.round(settleNT).toLocaleString() + '</td>';
             html += '</tr>';
           });
           html += '</tbody></table></details>';
