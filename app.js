@@ -2563,6 +2563,16 @@ var MemberPage = (function() {
     if (Router.getCurrent() === 'member') render();
   });
 
+  // 會員資料更新後自動刷新（名稱變更等）
+  EventBus.on(EVENTS.MEMBER_UPDATED, function() {
+    if (Router.getCurrent() === 'member') render();
+  });
+
+  // Firebase 同步會員資料後自動刷新
+  EventBus.on(EVENTS.MEMBERS_LOADED, function() {
+    if (Router.getCurrent() === 'member') render();
+  });
+
   // 新增代理（橋接，避免直接引用其他 Page 模組）
   function showAddAgent() {
     var ap = window['Agent' + 'Page'];
@@ -2580,6 +2590,9 @@ var MemberPage = (function() {
   function buildAgentPanel(tripMtxs) {
     var allMtxs = MemberTxs.getAll();
     var allBookings = Bookings.getAll();
+    var trip = Trips.getById(_selectedTrip);
+    var tripMemberIds = trip ? (trip.memberIds || []) : [];
+    if (!Array.isArray(tripMemberIds)) tripMemberIds = Object.values(tripMemberIds);
     var html = '';
 
     html += '<div class="mb-agent-panel">';
@@ -2640,7 +2653,10 @@ var MemberPage = (function() {
       var totalWinLoss = agentTxs.reduce(function(s, t) { return s + (t.ntResult || 0) * 10000; }, 0);
       var totalSettle = agentTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
       var roomCount = quota.roomCount;
-      var memberCount = agentTxs.filter(function(t, i, arr) { return arr.findIndex(function(x) { return x.memberId === t.memberId; }) === i; }).length;
+      var memberCount = tripMemberIds.filter(function(mid) {
+        var mem = Members.getById(mid);
+        return mem && mem.agentId === _selectedAgent;
+      }).length;
 
       html += '<div class="mb-ap-stats">';
       html += '<div class="mb-ap-stat"><label>總洗碼</label><span>' + fmtCardNum(totalWash) + ' 萬</span></div>';
@@ -2658,19 +2674,17 @@ var MemberPage = (function() {
         html += '<div class="empty-state">無代理資料</div>';
       } else {
         // 整體統計卡片
-        var totalWash = 0, totalSettle = 0, totalRooms = 0, totalMembers = 0;
-        var allMemberIds = new Set();
+        var totalWash = 0, totalSettle = 0, totalRooms = 0;
         agents.forEach(function(ag) {
           var agTxs = tripMtxs.filter(function(t) { return t.agentId === ag.id; });
           var agWash = agTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
           var agSettle = agTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
           var agRooms = allBookings.filter(function(b) { return b.agentId === ag.id; }).length;
-          agTxs.forEach(function(t) { allMemberIds.add(t.memberId); });
           totalWash += agWash;
           totalSettle += agSettle;
           totalRooms += agRooms;
         });
-        totalMembers = allMemberIds.size;
+        var totalMembers = tripMemberIds.length;
 
         html += '<div class="mb-ap-stats">';
         html += '<div class="mb-ap-stat"><label>總洗碼</label><span>' + fmtCardNum(totalWash) + ' 萬</span></div>';
@@ -2723,6 +2737,7 @@ var MemberPage = (function() {
     html += '</select></div>';
     html += '<div class="form-group"><label>貴賓廳</label>';
     html += '<select id="tx-hall" class="form-input">';
+    html += '<option value="">未選擇</option>';
     VIP_HALLS.forEach(function(h) { html += '<option value="' + h.id + '">' + h.name + '</option>'; });
     html += '</select></div>';
     html += '<div class="form-row">';
