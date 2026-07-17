@@ -2440,15 +2440,19 @@ var MemberPage = (function() {
       }
 
       html += '<div class="mb-dual-layout">';
+      // 會員卡片區（左欄）
       html += '<div class="mb-cards-col">';
 
       if (mtxs.length === 0) {
         html += '<div class="empty-state">此團無帳務記錄</div>';
       } else {
         html += '<div class="mb-card-grid">';
+        var selectedTripObj = Trips.getById(_selectedTrip);
         mtxs.forEach(function(tx) {
           var m = Members.getById(tx.memberId);
-          var hall = VIP_HALLS.find(function(h) { return h.id === tx.vipHallId; });
+          // 優先從團的 hallIds 讀取貴賓廳，若團無設定則回退到交易記錄的 vipHallId
+          var hallId = (selectedTripObj && selectedTripObj.hallIds && selectedTripObj.hallIds[0]) || tx.vipHallId || '';
+          var hall = VIP_HALLS.find(function(h) { return h.id === hallId; });
           var isNeg = (tx.upDown || 0) < 0;
 
           html += '<div class="mb-card">';
@@ -2736,9 +2740,13 @@ var MemberPage = (function() {
     });
     html += '</select></div>';
     html += '<div class="form-group"><label>貴賓廳</label>';
+    var defaultHallId = (trip && trip.hallIds && trip.hallIds[0]) || '';
     html += '<select id="tx-hall" class="form-input">';
     html += '<option value="">未選擇</option>';
-    VIP_HALLS.forEach(function(h) { html += '<option value="' + h.id + '">' + h.name + '</option>'; });
+    VIP_HALLS.forEach(function(h) {
+      var sel = h.id === defaultHallId ? ' selected' : '';
+      html += '<option value="' + h.id + '"' + sel + '>' + h.name + '</option>';
+    });
     html += '</select></div>';
     html += '<div class="form-row">';
     html += '<div class="form-group"><label>出碼(CR)(萬)</label><input type="number" step="0.001" id="tx-out" class="form-input" oninput="MemberPage.calcUpDown()"></div>';
@@ -2941,6 +2949,14 @@ var MemberPage = (function() {
     _expenseRows = (tx.expenses || []).map(function(e) { return Object.assign({}, e); });
 
     var html = '<div class="form-group"><label>會員: ' + tx.memberId + '</label></div>';
+    html += '<div class="form-group"><label>貴賓廳</label>';
+    html += '<select id="tx-hall" class="form-input">';
+    html += '<option value="">未選擇</option>';
+    VIP_HALLS.forEach(function(h) {
+      var sel = h.id === (tx.vipHallId || '') ? ' selected' : '';
+      html += '<option value="' + h.id + '"' + sel + '>' + h.name + '</option>';
+    });
+    html += '</select></div>';
     html += '<div class="form-row">';
     html += '<div class="form-group"><label>出碼(CR)(萬)</label><input type="number" step="0.001" id="tx-out" class="form-input" value="' + fmtNum(tx.outCode || 0) + '" oninput="MemberPage.calcUpDown()"></div>';
     html += '<div class="form-group"><label>回碼(寄碼)(萬)</label><input type="number" step="0.001" id="tx-back" class="form-input" value="' + fmtNum(tx.backCode || 0) + '" oninput="MemberPage.calcUpDown()"></div>';
@@ -2966,6 +2982,7 @@ var MemberPage = (function() {
 
   function saveEditTx(txId) {
     var patch = {
+      vipHallId: document.getElementById('tx-hall').value,
       outCode: parseFloat(document.getElementById('tx-out').value) || 0,
       backCode: parseFloat(document.getElementById('tx-back').value) || 0,
       washCode: parseFloat(document.getElementById('tx-wash').value) || 0,
