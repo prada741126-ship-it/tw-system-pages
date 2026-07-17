@@ -3363,7 +3363,7 @@ var ShareholderPage = (function() {
       html += '</tr>';
       html += '</tbody></table>';
 
-      // 貢獻度環形圖（SVG）
+      // 貢獻度環形圖 + 貴賓廳明細（左右並排）
       if (contribData.length > 0 && totalWash > 0) {
         var r = 60, cx = 80, cy = 80;
         var circ = 2 * Math.PI * r;
@@ -3377,8 +3377,10 @@ var ShareholderPage = (function() {
           segments += 'transform="rotate(-90 ' + cx + ' ' + cy + ')" />';
           acc += len;
         });
-        html += '<div style="display:flex;align-items:center;gap:20px;margin-top:12px;padding:12px;background:var(--bg-secondary);border-radius:var(--radius);">';
-        html += '<svg width="160" height="160" viewBox="0 0 160 160" style="flex-shrink:0;">' + segments + '</svg>';
+        html += '<div style="display:flex;gap:20px;margin-top:12px;padding:12px;background:var(--bg-secondary);border-radius:var(--radius);">';
+        // 左：環形圖 + 圖例
+        html += '<div style="display:flex;align-items:center;gap:16px;flex-shrink:0;">';
+        html += '<svg width="140" height="140" viewBox="0 0 160 160" style="flex-shrink:0;">' + segments + '</svg>';
         html += '<div style="display:flex;flex-direction:column;gap:6px;font-size:var(--font-size-sm);">';
         html += '<span style="font-weight:600;font-size:var(--font-size-base);margin-bottom:4px;">各股東貢獻度</span>';
         contribData.forEach(function(d) {
@@ -3389,41 +3391,40 @@ var ShareholderPage = (function() {
         });
         html += '</div>';
         html += '</div>';
+        // 右：貴賓廳明細
+        html += '<div style="flex:1;min-width:0;">';
+        html += '<table class="sh-hall-detail-table"><thead><tr>';
+        html += '<th>貴賓廳</th><th>洗碼(萬)</th><th>盈利(HK)</th><th>月退費(HK)</th><th>合計(HK)</th><th>佔比</th>';
+        html += '</tr></thead><tbody>';
+        halls.forEach(function(hall) {
+          var d = hallData[hall.id];
+          var sharePct = totalWash > 0 ? (d.wash / totalWash * 100).toFixed(1) : '0.0';
+          html += '<tr>';
+          html += '<td><span class="sh-rate-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:';
+          html += hall.id === 'lyi' ? 'var(--hall-lyi)' : hall.id === 'yub' ? 'var(--hall-yub)' : hall.id === 'jm1' ? 'var(--hall-jm1)' : 'var(--hall-jm8)';
+          html += ';"></span>' + hall.name + '</td>';
+          html += '<td>' + fmtWan(d.wash) + '</td>';
+          html += '<td>' + fmtHK(d.profit) + '</td>';
+          html += '<td>' + fmtHK(d.rebate) + '</td>';
+          html += '<td>' + fmtHK(d.total) + '</td>';
+          html += '<td>' + sharePct + '%</td>';
+          html += '</tr>';
+        });
+        html += '<tr class="total-row">';
+        html += '<td>總計</td>';
+        html += '<td>' + fmtWan(totalWash) + '</td>';
+        html += '<td>' + fmtHK(totalProfit) + '</td>';
+        html += '<td>' + fmtHK(totalRebate) + '</td>';
+        html += '<td>' + fmtHK(grandTotal) + '</td>';
+        html += '<td>100%</td>';
+        html += '</tr>';
+        html += '</tbody></table>';
+        html += '</div>';
+        html += '</div>';
       }
     } else {
       html += '<div class="empty-state">尚無股東資料</div>';
     }
-    html += '</div>';
-
-    // ===== 4. 貴賓廳明細（全寬） =====
-    html += '<div class="sh-card">';
-    html += '<div class="sh-card-header"><h3 class="sh-section-title">貴賓廳明細</h3></div>';
-    html += '<table class="sh-hall-detail-table"><thead><tr>';
-    html += '<th>貴賓廳</th><th>洗碼(萬)</th><th>盈利(HK)</th><th>月退費(HK)</th><th>合計(HK)</th><th>佔比</th>';
-    html += '</tr></thead><tbody>';
-    halls.forEach(function(hall) {
-      var d = hallData[hall.id];
-      var sharePct = totalWash > 0 ? (d.wash / totalWash * 100).toFixed(1) : '0.0';
-      html += '<tr>';
-      html += '<td><span class="sh-rate-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:';
-      html += hall.id === 'lyi' ? 'var(--hall-lyi)' : hall.id === 'yub' ? 'var(--hall-yub)' : hall.id === 'jm1' ? 'var(--hall-jm1)' : 'var(--hall-jm8)';
-      html += ';"></span>' + hall.name + '</td>';
-      html += '<td>' + fmtWan(d.wash) + '</td>';
-      html += '<td>' + fmtHK(d.profit) + '</td>';
-      html += '<td>' + fmtHK(d.rebate) + '</td>';
-      html += '<td>' + fmtHK(d.total) + '</td>';
-      html += '<td>' + sharePct + '%</td>';
-      html += '</tr>';
-    });
-    html += '<tr class="total-row">';
-    html += '<td>總計</td>';
-    html += '<td>' + fmtWan(totalWash) + '</td>';
-    html += '<td>' + fmtHK(totalProfit) + '</td>';
-    html += '<td>' + fmtHK(totalRebate) + '</td>';
-    html += '<td>' + fmtHK(grandTotal) + '</td>';
-    html += '<td>100%</td>';
-    html += '</tr>';
-    html += '</tbody></table>';
     html += '</div>';
 
     // ===== 5. 圖表 + 額外收入雙欄 =====
