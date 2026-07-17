@@ -2187,7 +2187,7 @@ var OverviewPage = (function() {
     });
     html += '</select></div>';
     html += '<div class="form-group"><label>成員</label>';
-    html += '<select id="trip-members" class="form-input" multiple>';
+    html += '<select id="trip-members" class="form-input" multiple size="6">';
     members.forEach(function(m) {
       html += '<option value="' + m.id + '">' + m.id + ' ' + m.name + '</option>';
     });
@@ -2241,9 +2241,11 @@ var OverviewPage = (function() {
     });
     html += '</select></div>';
     html += '<div class="form-group"><label>成員</label>';
-    html += '<select id="trip-members-edit" class="form-input" multiple>';
+    html += '<select id="trip-members-edit" class="form-input" multiple size="6">';
     members.forEach(function(m) {
-      var sel = (trip.memberIds || []).indexOf(m.id) >= 0 ? ' selected' : '';
+      var memberIds = trip.memberIds || [];
+      if (!Array.isArray(memberIds)) memberIds = Object.values(memberIds);
+      var sel = memberIds.indexOf(m.id) >= 0 ? ' selected' : '';
       html += '<option value="' + m.id + '"' + sel + '>' + m.id + ' ' + m.name + '</option>';
     });
     html += '</select></div>';
