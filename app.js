@@ -2598,7 +2598,7 @@ var MemberPage = (function() {
     var tp = Settings.getTicketPrices();
     var html = '';
     _expenseRows.forEach(function(row, i) {
-      html += '<div class="form-row expense-row">';
+      html += '<div class="form-row expense-row" data-idx="' + i + '">';
       html += '<select class="form-input" style="flex:1;min-width:100px;" onchange="MemberPage._updExpType(' + i + ',this.value)">';
       html += '<option value="other"' + (row.ticketType === 'other' || !row.ticketType ? ' selected' : '') + '>其他</option>';
       (tp.waterDance || []).forEach(function(t, j) {
@@ -2614,13 +2614,13 @@ var MemberPage = (function() {
         html += '<span style="flex:1;min-width:80px;display:flex;align-items:center;font-size:var(--font-size-sm);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (row.name || '') + '</span>';
       }
       html += '<input type="number" step="1" min="1" placeholder="數量" class="form-input" style="width:60px;flex:0 0 60px;" value="' + (row.quantity || 1) + '" oninput="MemberPage._updExp(' + i + ',\'quantity\',this.value)">';
-      html += '<input type="number" placeholder="金額" class="form-input" style="width:80px;flex:0 0 80px;" value="' + (row.amountHK || 0) + '" onchange="MemberPage._updExp(' + i + ',\'amountHK\',this.value)">';
+      html += '<input type="number" placeholder="金額" class="form-input exp-amt" style="width:80px;flex:0 0 80px;" value="' + (row.amountHK || 0) + '" onchange="MemberPage._updExp(' + i + ',\'amountHK\',this.value)">';
       html += '<input type="number" step="0.01" placeholder="匯率" class="form-input" style="width:60px;flex:0 0 60px;" value="' + (row.exchangeRate || 4.2) + '" onchange="MemberPage._updExp(' + i + ',\'exchangeRate\',this.value)">';
       html += '<button class="btn-sm btn-danger" onclick="MemberPage._delExp(' + i + ')" style="flex:0 0 32px;padding:4px;">×</button>';
       html += '</div>';
       // 非其他時顯示單價提示
       if (row.ticketType && row.ticketType !== 'other' && row.unitPrice) {
-        html += '<div style="font-size:var(--font-size-sm);color:var(--text-secondary);padding-left:4px;margin-bottom:4px;">單價 ' + row.unitPrice + ' HK × ' + (row.quantity || 1) + ' = ' + ((row.unitPrice || 0) * (row.quantity || 1)) + ' HK</div>';
+        html += '<div class="exp-hint-' + i + '" style="font-size:var(--font-size-sm);color:var(--text-secondary);padding-left:4px;margin-bottom:4px;">單價 ' + row.unitPrice + ' HK × ' + (row.quantity || 1) + ' = ' + ((row.unitPrice || 0) * (row.quantity || 1)) + ' HK</div>';
       }
     });
     container.innerHTML = html;
@@ -2654,11 +2654,17 @@ var MemberPage = (function() {
     if (field === 'name') {
       _expenseRows[i][field] = val;
     } else if (field === 'quantity') {
-      _expenseRows[i].quantity = parseInt(val) || 1;
+      // 允許空字串暫存，不強制 || 1，避免 BACKSPACE 刪不掉
+      var qty = val === '' ? 0 : (parseInt(val) || 0);
+      _expenseRows[i].quantity = qty;
       if (_expenseRows[i].ticketType && _expenseRows[i].ticketType !== 'other' && _expenseRows[i].unitPrice) {
-        _expenseRows[i].amountHK = _expenseRows[i].unitPrice * _expenseRows[i].quantity;
+        _expenseRows[i].amountHK = _expenseRows[i].unitPrice * (qty || 1);
+        // 只更新金額欄和提示行，不重渲染整行（避免搶焦點）
+        var amtInput = document.querySelector('.expense-row[data-idx="' + i + '"] .exp-amt');
+        if (amtInput) amtInput.value = _expenseRows[i].amountHK;
+        var hint = document.querySelector('.exp-hint-' + i);
+        if (hint) hint.textContent = '單價 ' + _expenseRows[i].unitPrice + ' HK × ' + (qty || 1) + ' = ' + _expenseRows[i].amountHK + ' HK';
       }
-      renderExpenseRows();
     } else {
       _expenseRows[i][field] = parseFloat(val) || 0;
     }
@@ -2691,7 +2697,7 @@ var MemberPage = (function() {
       rebate1: parseFloat(document.getElementById('tx-rebate1').value) || 0,
       rate2: parseFloat(document.getElementById('tx-rate2').value) || 0,
       rebate2: parseFloat(document.getElementById('tx-rebate2').value) || 0,
-      expenses: _expenseRows.slice(),
+      expenses: _expenseRows.map(function(e) { e.quantity = e.quantity || 1; return e; }),
     };
     var tx = MemberTxs.create(data);
     // 更新团最后结帐日期
@@ -2742,7 +2748,7 @@ var MemberPage = (function() {
       rebate1: parseFloat(document.getElementById('tx-rebate1').value) || 0,
       rate2: parseFloat(document.getElementById('tx-rate2').value) || 0,
       rebate2: parseFloat(document.getElementById('tx-rebate2').value) || 0,
-      expenses: _expenseRows.slice(),
+      expenses: _expenseRows.map(function(e) { e.quantity = e.quantity || 1; return e; }),
     };
     MemberTxs.update(txId, patch);
     Modal.close();
