@@ -148,11 +148,11 @@ var EVENTS = {
 // 贵宾厅设定
 // ============================================================================
 var VIP_HALLS = [
-  // rate = 退傭 = cashRate + rebateRate
-  { id: 'lyi', name: '勵盈會', rate: 0.0123, cashRate: 0.0018, hasMonthlyRebate: true, rebateRate: 0.0105 },
-  { id: 'yub', name: '御匾會', rate: 0.0120, cashRate: 0.0015, hasMonthlyRebate: true, rebateRate: 0.0105 },
-  { id: 'jm1', name: '金門1',  rate: 0.0123, cashRate: 0.0023, hasMonthlyRebate: true, rebateRate: 0.0100 },
-  { id: 'jm8', name: '金門8',  rate: 0.0118, cashRate: 0.0018, hasMonthlyRebate: true, rebateRate: 0.0100 },
+  // rate = 退傭(總) = cashRate(現結/盈利) + rebateRate(月退) + guestRate(客人退佣)
+  { id: 'lyi', name: '勵盈會', rate: 0.0123, cashRate: 0.0018, guestRate: 0.01, hasMonthlyRebate: true,  rebateRate: 0.0005 },
+  { id: 'yub', name: '御匾會', rate: 0.0120, cashRate: 0.0015, guestRate: 0.01, hasMonthlyRebate: true,  rebateRate: 0.0005 },
+  { id: 'jm1', name: '金門1',  rate: 0.0123, cashRate: 0.0023, guestRate: 0.01, hasMonthlyRebate: false, rebateRate: 0 },
+  { id: 'jm8', name: '金門8',  rate: 0.0118, cashRate: 0.0018, guestRate: 0.01, hasMonthlyRebate: false, rebateRate: 0 },
 ];
 
 // ============================================================================
@@ -3135,11 +3135,12 @@ var ShareholderPage = (function() {
     halls.forEach(function(hall) {
       var cashPct = ((hall.cashRate || hall.rate) * 100).toFixed(2);
       var rebatePct = (hall.rebateRate * 100).toFixed(2);
+      var guestPct = ((hall.guestRate || 0.01) * 100).toFixed(2);
       var totalPct = (hall.rate * 100).toFixed(2);
       html += '<div class="sh-rate-pill ' + hallClass(hall.id) + '" onclick="ShareholderPage.editRate(\'' + hall.id + '\')">';
       html += '<span class="sh-rate-dot"></span>';
       html += '<span class="sh-rate-name">' + hall.name + '</span>';
-      html += '<span class="sh-rate-vals">退傭<b>' + totalPct + '</b>/現結<b>' + cashPct + '</b>/月退<b>' + rebatePct + '</b></span>';
+      html += '<span class="sh-rate-vals">退傭<b>' + totalPct + '</b>/現結<b>' + cashPct + '</b>/月退<b>' + rebatePct + '</b>/客退<b>' + guestPct + '</b></span>';
       html += '</div>';
     });
     html += '</div>';
@@ -3369,8 +3370,9 @@ var ShareholderPage = (function() {
     html += '<div class="form-group"><label>退傭(%)</label><input type="number" step="0.01" class="form-input" value="' + (hall.rate * 100).toFixed(2) + '" id="rate-total" readonly></div>';
     html += '<div class="form-group"><label>現結(%)</label><input type="number" step="0.01" class="form-input" value="' + ((hall.cashRate || hall.rate) * 100).toFixed(2) + '" id="rate-cash" oninput="ShareholderPage.calcTotalRate()"></div>';
     html += '<div class="form-group"><label>月退(%)</label><input type="number" step="0.01" class="form-input" value="' + (hall.rebateRate * 100).toFixed(2) + '" id="rate-rebate" oninput="ShareholderPage.calcTotalRate()"></div>';
+    html += '<div class="form-group"><label>客人退佣(%)</label><input type="number" step="0.01" class="form-input" value="' + ((hall.guestRate || 0.01) * 100).toFixed(2) + '" id="rate-guest" oninput="ShareholderPage.calcTotalRate()"></div>';
     html += '</div>';
-    html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);">退傭 = 現結 + 月退（自動計算）</p>';
+    html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);">退傭 = 現結 + 月退 + 客人退佣（自動計算）</p>';
     html += '<div style="text-align:right;margin-top:16px;"><button class="btn btn-primary" onclick="ShareholderPage.saveRate(\'' + hallId + '\')">儲存</button></div>';
     Modal.open('編輯費率 — ' + hall.name, html);
   }
@@ -3378,18 +3380,21 @@ var ShareholderPage = (function() {
   function calcTotalRate() {
     var cash = parseFloat(document.getElementById('rate-cash').value) || 0;
     var rebate = parseFloat(document.getElementById('rate-rebate').value) || 0;
-    document.getElementById('rate-total').value = (cash + rebate).toFixed(2);
+    var guest = parseFloat(document.getElementById('rate-guest').value) || 0;
+    document.getElementById('rate-total').value = (cash + rebate + guest).toFixed(2);
   }
 
   function saveRate(hallId) {
     var cash = parseFloat(document.getElementById('rate-cash').value) || 0;
     var rebate = parseFloat(document.getElementById('rate-rebate').value) || 0;
+    var guest = parseFloat(document.getElementById('rate-guest').value) || 0;
     var halls = Settings.getVipHalls();
     var idx = halls.findIndex(function(h) { return h.id === hallId; });
     if (idx < 0) return;
     halls[idx].cashRate = cash / 100;
     halls[idx].rebateRate = rebate / 100;
-    halls[idx].rate = (cash + rebate) / 100;
+    halls[idx].guestRate = guest / 100;
+    halls[idx].rate = (cash + rebate + guest) / 100;
     halls[idx].hasMonthlyRebate = rebate > 0;
     Settings.updateVipHalls(halls);
     Modal.close();
