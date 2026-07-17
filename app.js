@@ -2608,10 +2608,18 @@ var MemberPage = (function() {
   function editTx(txId) {
     var tx = MemberTxs.getById(txId);
     if (!tx) return;
-    // 简化版：只编辑开销
     _expenseRows = (tx.expenses || []).map(function(e) { return Object.assign({}, e); });
+
     var html = '<div class="form-group"><label>會員: ' + tx.memberId + '</label></div>';
-    html += '<p>出碼: ' + tx.outCode + ' | 回碼: ' + tx.backCode + ' | 洗碼: ' + tx.washCode + '</p>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>出碼(CR)(萬)</label><input type="number" step="0.001" id="tx-out" class="form-input" value="' + fmtNum(tx.outCode || 0) + '" oninput="MemberPage.calcUpDown()"></div>';
+    html += '<div class="form-group"><label>回碼(寄碼)(萬)</label><input type="number" step="0.001" id="tx-back" class="form-input" value="' + fmtNum(tx.backCode || 0) + '" oninput="MemberPage.calcUpDown()"></div>';
+    html += '</div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>客上(萬)</label><input type="number" step="0.001" id="tx-up" class="form-input" value="' + fmtNum(tx.customerUp || 0) + '" oninput="MemberPage.calcWash()"></div>';
+    html += '<div class="form-group"><label>客下(萬)</label><input type="number" step="0.001" id="tx-down" class="form-input" value="' + fmtNum(tx.customerDown || 0) + '" oninput="MemberPage.calcWash()"></div>';
+    html += '<div class="form-group"><label>洗碼(萬)</label><input type="number" step="0.001" id="tx-wash" class="form-input" value="' + fmtNum(tx.washCode || 0) + '"></div>';
+    html += '</div>';
     html += '<div id="tx-expenses"></div>';
     html += '<button class="btn-sm" onclick="MemberPage.addExpenseRow()">+ 開銷</button>';
     html += '<div style="text-align:right;margin-top:16px;">';
@@ -2621,7 +2629,15 @@ var MemberPage = (function() {
   }
 
   function saveEditTx(txId) {
-    MemberTxs.update(txId, { expenses: _expenseRows.slice() });
+    var patch = {
+      outCode: parseFloat(document.getElementById('tx-out').value) || 0,
+      backCode: parseFloat(document.getElementById('tx-back').value) || 0,
+      washCode: parseFloat(document.getElementById('tx-wash').value) || 0,
+      customerUp: parseFloat(document.getElementById('tx-up').value) || 0,
+      customerDown: parseFloat(document.getElementById('tx-down').value) || 0,
+      expenses: _expenseRows.slice(),
+    };
+    MemberTxs.update(txId, patch);
     Modal.close();
     _expenseRows = [];
     Toast.success('帳務已更新');
