@@ -3317,23 +3317,37 @@ var ShareholderPage = (function() {
     if (shareholders.length > 0 && totalShares > 0) {
       html += '<table class="sh-profit-table"><thead><tr>';
       html += '<th>股東</th><th>持股</th><th>洗碼(萬)</th>';
-      html += '<th class="num">資金股50%(HK)</th><th class="num">貢獻可得(HK)</th><th class="num">額外收入(HK)</th>';
+      html += '<th class="num">資金股50%(HK)</th><th style="text-align:center;">貢獻度</th><th class="num">貢獻可得(HK)</th><th class="num">額外收入(HK)</th>';
       html += '<th class="num">合計應付(HK)</th><th class="num">合計應付(TW)</th>';
       html += '</tr></thead><tbody>';
 
+      var SH_COLORS = ['#378ADD', '#1D9E75', '#EF9F27', '#D4537E', '#7F77DD'];
       var sumHK = 0, sumTW = 0;
-      shareholders.forEach(function(sh) {
+      var contribData = [];
+      shareholders.forEach(function(sh, idx) {
         var profitData = calcShareholderProfit(sh, monthTxs, settings, _currentMonth);
         var totalData = calcShareholderTotal(profitData, shareholders, totalWash, grandTotal, totalExtra);
         var extraShare = totalExtra * (sh.shares / totalShares);
         sumHK += totalData.totalPayableHK;
         sumTW += totalData.totalPayableTW;
 
+        var contribPct = (totalData.contribution * 100).toFixed(1);
+        var barColor = SH_COLORS[idx % SH_COLORS.length];
+        contribData.push({ name: sh.name, pct: totalData.contribution * 100, wash: profitData.personalWash, color: barColor });
+
         html += '<tr>';
         html += '<td>' + sh.name + '</td>';
         html += '<td>' + sh.shares + '</td>';
         html += '<td>' + fmtWan(profitData.personalWash) + '</td>';
         html += '<td class="num">' + fmtHK(totalData.capital50) + '</td>';
+        html += '<td style="text-align:center;">';
+        html += '<div style="display:inline-flex;align-items:center;gap:6px;">';
+        html += '<div style="width:48px;height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;">';
+        html += '<div style="width:' + contribPct + '%;height:100%;background:' + barColor + ';border-radius:3px;"></div>';
+        html += '</div>';
+        html += '<span style="font-size:var(--font-size-sm);font-weight:500;min-width:36px;text-align:right;">' + contribPct + '%</span>';
+        html += '</div>';
+        html += '</td>';
         html += '<td class="num">' + fmtHK(totalData.contribution50) + '</td>';
         html += '<td class="num">' + fmtHK(extraShare) + '</td>';
         html += '<td class="num">' + fmtHK(totalData.totalPayableHK) + '</td>';
@@ -3343,11 +3357,39 @@ var ShareholderPage = (function() {
 
       html += '<tr class="total-row">';
       html += '<td>合計</td><td>' + totalShares + '</td><td>' + fmtWan(totalWash) + '</td>';
-      html += '<td class="num">—</td><td class="num">—</td><td class="num">' + fmtHK(totalExtra) + '</td>';
+      html += '<td class="num">—</td><td style="text-align:center;">100%</td><td class="num">—</td><td class="num">' + fmtHK(totalExtra) + '</td>';
       html += '<td class="num">' + fmtHK(sumHK) + '</td>';
       html += '<td class="num num-positive">' + fmtHK(sumTW) + '</td>';
       html += '</tr>';
       html += '</tbody></table>';
+
+      // 貢獻度環形圖（SVG）
+      if (contribData.length > 0 && totalWash > 0) {
+        var r = 60, cx = 80, cy = 80;
+        var circ = 2 * Math.PI * r;
+        var acc = 0;
+        var segments = '';
+        contribData.forEach(function(d) {
+          var len = (d.pct / 100) * circ;
+          segments += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + d.color + '" stroke-width="24" ';
+          segments += 'stroke-dasharray="' + len + ' ' + (circ - len) + '" ';
+          segments += 'stroke-dashoffset="' + (-acc) + '" ';
+          segments += 'transform="rotate(-90 ' + cx + ' ' + cy + ')" />';
+          acc += len;
+        });
+        html += '<div style="display:flex;align-items:center;gap:20px;margin-top:12px;padding:12px;background:var(--bg-secondary);border-radius:var(--radius);">';
+        html += '<svg width="160" height="160" viewBox="0 0 160 160" style="flex-shrink:0;">' + segments + '</svg>';
+        html += '<div style="display:flex;flex-direction:column;gap:6px;font-size:var(--font-size-sm);">';
+        html += '<span style="font-weight:600;font-size:var(--font-size-base);margin-bottom:4px;">各股東貢獻度</span>';
+        contribData.forEach(function(d) {
+          html += '<span style="display:flex;align-items:center;gap:8px;">';
+          html += '<span style="width:10px;height:10px;border-radius:2px;background:' + d.color + ';flex-shrink:0;"></span>';
+          html += '<span>' + d.name + ' ' + d.pct.toFixed(1) + '% (' + fmtWan(d.wash) + ' 萬)</span>';
+          html += '</span>';
+        });
+        html += '</div>';
+        html += '</div>';
+      }
     } else {
       html += '<div class="empty-state">尚無股東資料</div>';
     }
@@ -3361,14 +3403,13 @@ var ShareholderPage = (function() {
     html += '</div>';
     if (extraIncomes.length > 0 || ticketProfits.length > 0) {
       html += '<table class="sh-extra-table"><thead><tr>';
-      html += '<th>描述</th><th>金額(HK)</th><th>金額(TW)</th><th>操作</th>';
+      html += '<th>描述</th><th class="num">金額(HK)</th><th>操作</th>';
       html += '</tr></thead><tbody>';
       // 手動額外收入
       extraIncomes.forEach(function(e) {
         html += '<tr>';
         html += '<td>' + (e.description || '') + '</td>';
         html += '<td class="num">' + fmtHK(e.amountHK || 0) + '</td>';
-        html += '<td class="num">' + fmtHK((e.amountHK || 0) * exchangeRate) + '</td>';
         html += '<td><button class="btn-sm" onclick="ShareholderPage.editExtra(\'' + e.id + '\')">編輯</button> ';
         html += '<button class="btn-sm btn-danger" onclick="ShareholderPage.delExtra(\'' + e.id + '\')">刪</button></td>';
         html += '</tr>';
@@ -3380,11 +3421,10 @@ var ShareholderPage = (function() {
         html += '<tr style="background:var(--bg-tertiary);">';
         html += '<td>' + dateDisplay + ' ' + tp.agentName + ' ' + tp.itemName + '</td>';
         html += '<td class="num">' + fmtHK(tp.profitHK) + '</td>';
-        html += '<td class="num">' + fmtHK(tp.profitHK * exchangeRate) + '</td>';
         html += '<td style="color:var(--text-secondary);font-size:var(--font-size-sm);">自動</td>';
         html += '</tr>';
       });
-      html += '<tr class="total-row"><td>合計</td><td class="num">' + fmtHK(totalExtra) + '</td><td class="num">' + fmtHK(totalExtra * exchangeRate) + '</td><td></td></tr>';
+      html += '<tr class="total-row"><td>合計</td><td class="num">' + fmtHK(totalExtra) + '</td><td></td></tr>';
       html += '</tbody></table>';
       html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);margin-top:4px;">依持股比例分配至各股東</p>';
     } else {
