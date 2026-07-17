@@ -2758,9 +2758,9 @@ var MemberPage = (function() {
   function fmtNT(n) {
     return fmtCardNum((n || 0) * 10000);
   }
-  // 總交收 = 小計×10000 + 開銷NT
+  // 總交收 = 小計×10000 - 開銷NT
   function calcTotalNT(tx) {
-    return (tx.subtotal || 0) * 10000 + (tx.expensesNT || 0);
+    return (tx.subtotal || 0) * 10000 - (tx.expensesNT || 0);
   }
 
   function calcUpDown() {

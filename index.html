@@ -550,10 +550,10 @@ a { color: var(--accent); text-decoration: none; }
 /* Modal 表單寬度 */
 .mb-tx-form { min-width: 400px; }
 
-/* ===== 佈局：會員卡片 + 代理匯總 ===== */
+/* ===== 佈局：會員卡片 + 代理匯總 50/50 ===== */
 .mb-dual-layout {
   display: grid;
-  grid-template-columns: 1fr 340px;
+  grid-template-columns: 1fr 1fr;
   gap: var(--spacing-lg);
   margin-top: var(--spacing-md);
   align-items: start;
@@ -563,7 +563,7 @@ a { color: var(--accent); text-decoration: none; }
   min-width: 0;
 }
 .mb-cards-col .mb-card-grid {
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 .mb-agent-panel {
   grid-column: 2;
@@ -1224,6 +1224,6 @@ a { color: var(--accent); text-decoration: none; }
 <!-- Toast -->
 <div id="toast-container" class="toast-container"></div>
 
-<script src="app.js?v=1784320694307"></script>
+<script src="app.js?v=1784320836481"></script>
 </body>
 </html>
