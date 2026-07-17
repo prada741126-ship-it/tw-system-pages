@@ -470,21 +470,29 @@ a { color: var(--accent); text-decoration: none; }
 .mb-card-expense-head,
 .mb-card-expense-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
   gap: var(--spacing-xs);
   padding: 2px 0;
+  align-items: center;
 }
 .mb-card-expense-head {
   font-weight: 600;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border);
   margin-bottom: 2px;
+  padding-bottom: 4px;
 }
 .mb-card-expense-row span {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 .mb-card-expense-row span:first-child {
+  text-align: left;
+}
+.mb-card-expense-head span {
+  text-align: right;
+}
+.mb-card-expense-head span:first-child {
   text-align: left;
 }
 
@@ -1224,6 +1232,6 @@ a { color: var(--accent); text-decoration: none; }
 <!-- Toast -->
 <div id="toast-container" class="toast-container"></div>
 
-<script src="app.js?v=1784320836481"></script>
+<script src="app.js?v=1784321385599"></script>
 </body>
 </html>
