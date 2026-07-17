@@ -3861,8 +3861,11 @@ var SettingsPage = (function() {
 
     // 贵宾厅费率
     var halls = Settings.getVipHalls();
-    html += '<div class="card">';
-    html += '<div class="card-header"><h3>貴賓廳費率</h3></div>';
+    html += '<div class="card st-collapsible">';
+    html += '<div class="card-header st-collapsible-header" onclick="SettingsPage.toggleCard(this)">';
+    html += '<h3>貴賓廳費率</h3><span class="st-toggle-icon">▼</span>';
+    html += '</div>';
+    html += '<div class="st-collapsible-body">';
     html += '<table class="data-table"><thead><tr>';
     html += '<th>廳名</th><th>費率</th><th>月退費</th><th>月退費率</th>';
     html += '</tr></thead><tbody>';
@@ -3870,16 +3873,19 @@ var SettingsPage = (function() {
       html += '<tr>';
       html += '<td>' + hall.name + '</td>';
       html += '<td><input type="number" step="0.0001" class="form-input compact" value="' + hall.rate + '" onchange="SettingsPage.updateHall(' + i + ',\'rate\',this.value)"></td>';
-      html += '<td>' + (hall.hasMonthlyRebate ? '是' : '否') + '</td>';
+      html += '<td><input type="checkbox" ' + (hall.hasMonthlyRebate ? 'checked' : '') + ' onchange="SettingsPage.toggleRebate(' + i + ',this.checked)"></td>';
       html += '<td><input type="number" step="0.0001" class="form-input compact" value="' + hall.rebateRate + '" onchange="SettingsPage.updateHall(' + i + ',\'rebateRate\',this.value)" ' + (hall.hasMonthlyRebate ? '' : 'disabled') + '></td>';
       html += '</tr>';
     });
-    html += '</tbody></table></div>';
+    html += '</tbody></table></div></div>';
 
     // 門票預設價格
     var tp = Settings.getTicketPrices();
-    html += '<div class="card">';
-    html += '<div class="card-header"><h3>門票預設價格</h3></div>';
+    html += '<div class="card st-collapsible">';
+    html += '<div class="card-header st-collapsible-header" onclick="SettingsPage.toggleCard(this)">';
+    html += '<h3>門票預設價格</h3><span class="st-toggle-icon">▼</span>';
+    html += '</div>';
+    html += '<div class="st-collapsible-body">';
 
     // 水舞間
     html += '<h4 style="margin:8px 0 4px;font-size:var(--font-size-sm);color:var(--text-secondary);">水舞間</h4>';
@@ -3907,7 +3913,7 @@ var SettingsPage = (function() {
     html += '<td><input type="number" step="1" class="form-input compact" value="' + wp.ourPrice + '" onchange="SettingsPage.updateTicket(\'waterPark\',null,\'ourPrice\',this.value)"></td>';
     html += '</tr>';
     html += '</tbody></table>';
-    html += '</div>';
+    html += '</div></div>';
 
     // 修改密码
     html += '<div class="card">';
@@ -3960,7 +3966,22 @@ var SettingsPage = (function() {
     Toast.success('價格已更新');
   }
 
-  return { render: render, saveRate: saveRate, updateHall: updateHall, updateTicket: updateTicket, changePwd: changePwd };
+  function toggleRebate(idx, checked) {
+    var halls = Settings.getVipHalls();
+    halls[idx].hasMonthlyRebate = checked;
+    Settings.updateVipHalls(halls);
+    render();
+    Toast.success('月退費設定已更新');
+  }
+
+  function toggleCard(header) {
+    var card = header.parentElement;
+    card.classList.toggle('st-collapsed');
+    var icon = header.querySelector('.st-toggle-icon');
+    if (icon) icon.textContent = card.classList.contains('st-collapsed') ? '▶' : '▼';
+  }
+
+  return { render: render, saveRate: saveRate, updateHall: updateHall, toggleRebate: toggleRebate, toggleCard: toggleCard, updateTicket: updateTicket, changePwd: changePwd };
 })();
 
 
