@@ -2107,7 +2107,9 @@ var OverviewPage = (function() {
         html += '<td>' + hallName + '</td>';
         html += '<td>' + (trip.memberIds || []).length + '人</td>';
         html += '<td>' + (trip.startDate || '') + '</td>';
-        html += '<td><button class="btn-sm" onclick="Router.go(\'member\');window._selectedTrip=\'' + trip.id + '\'">查看</button></td>';
+        html += '<td><button class="btn-sm" onclick="OverviewPage.showEditTrip(\'' + trip.id + '\')">編輯</button> ';
+        html += '<button class="btn-sm btn-danger" onclick="OverviewPage.deleteTrip(\'' + trip.id + '\')">刪除</button> ';
+        html += '<button class="btn-sm" onclick="Router.go(\'member\');window._selectedTrip=\'' + trip.id + '\'">查看</button></td>';
         html += '</tr>';
       });
       html += '</tbody></table>';
@@ -2195,7 +2197,69 @@ var OverviewPage = (function() {
     render();
   }
 
-  return { render: render, showCreateTrip: showCreateTrip, createTrip: createTrip };
+  return { render: render, showCreateTrip: showCreateTrip, createTrip: createTrip, showEditTrip: showEditTrip, saveEditTrip: saveEditTrip, deleteTrip: deleteTrip };
+
+  function showEditTrip(tripId) {
+    var trip = Trips.getById(tripId);
+    if (!trip) { Toast.error('團不存在'); return; }
+    var shareholders = Shareholders.getAll();
+    var members = Members.getAll();
+    var html = '';
+    html += '<div class="form-group"><label>團ID</label><input type="text" class="form-input" value="' + trip.id + '" disabled></div>';
+    html += '<div class="form-group"><label>股東(上線)</label>';
+    html += '<select id="trip-sh-edit" class="form-input">';
+    shareholders.forEach(function(sh) {
+      html += '<option value="' + sh.id + '"' + (trip.shareholderId === sh.id ? ' selected' : '') + '>' + sh.name + ' (持股:' + sh.shares + ')</option>';
+    });
+    html += '</select></div>';
+    html += '<div class="form-group"><label>貴賓廳</label>';
+    html += '<select id="trip-hall-edit" class="form-input" multiple>';
+    VIP_HALLS.forEach(function(h) {
+      var sel = (trip.hallIds || []).indexOf(h.id) >= 0 ? ' selected' : '';
+      html += '<option value="' + h.id + '"' + sel + '>' + h.name + '</option>';
+    });
+    html += '</select></div>';
+    html += '<div class="form-group"><label>成員</label>';
+    html += '<select id="trip-members-edit" class="form-input" multiple>';
+    members.forEach(function(m) {
+      var sel = (trip.memberIds || []).indexOf(m.id) >= 0 ? ' selected' : '';
+      html += '<option value="' + m.id + '"' + sel + '>' + m.id + ' ' + m.name + '</option>';
+    });
+    html += '</select></div>';
+    html += '<div class="form-group"><label>備註</label>';
+    html += '<input type="text" id="trip-notes-edit" class="form-input" value="' + (trip.notes || '') + '"></div>';
+    html += '<div style="text-align:right;margin-top:16px;">';
+    html += '<button class="btn btn-primary" onclick="OverviewPage.saveEditTrip(\'' + tripId + '\')">儲存變更</button></div>';
+    Modal.open('編輯團 ' + tripId, html);
+  }
+
+  function saveEditTrip(tripId) {
+    var shId = document.getElementById('trip-sh-edit').value;
+    var hallSelect = document.getElementById('trip-hall-edit');
+    var hallIds = Array.from(hallSelect.selectedOptions).map(function(o) { return o.value; });
+    var memberSelect = document.getElementById('trip-members-edit');
+    var memberIds = Array.from(memberSelect.selectedOptions).map(function(o) { return o.value; });
+    var notes = document.getElementById('trip-notes-edit').value;
+    Trips.update(tripId, {
+      shareholderId: shId,
+      hallIds: hallIds,
+      memberIds: memberIds,
+      notes: notes,
+    });
+    Modal.close();
+    Toast.success('團 ' + tripId + ' 已更新');
+    render();
+  }
+
+  function deleteTrip(tripId) {
+    var trip = Trips.getById(tripId);
+    var name = trip ? trip.id : tripId;
+    Modal.confirm('確定要刪除團 ' + name + '？\n此操作不可逆，相關的會員帳務和訂房將保留。', function() {
+      Trips.remove(tripId);
+      Toast.success('團 ' + tripId + ' 已刪除');
+      render();
+    });
+  }
 })();
 
 
