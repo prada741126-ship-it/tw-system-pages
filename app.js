@@ -931,9 +931,11 @@ var RecentlyDeleted = (function() {
 var _db = null;
 var _authReady = false;
 var _onReady = null;
+var _initPromise = null;
 
 function initFirebase() {
-  return new Promise(function(resolve) {
+  if (_initPromise) return _initPromise;
+  _initPromise = new Promise(function(resolve) {
     if (!TW_FIREBASE_CONFIG.apiKey) {
       console.warn('[Firebase] apiKey 未设置，离线模式');
       resolve(null);
@@ -1105,7 +1107,11 @@ var Uploader = {
 var _watchers = [];
 var _isSyncing = false;
 
+var _initialized = false;
+
 function initWatchers() {
+  if (_initialized) return;
+  _initialized = true;
   if (!isReady()) {
     onReady(function() { _setupWatchers(); });
   } else {
@@ -1945,7 +1951,10 @@ var Modal = (function() {
  * 依赖: core/constants.js, core/router.js
  */
 var Keyboard = (function() {
+  var _bound = false;
   function init() {
+    if (_bound) return;
+    _bound = true;
     document.addEventListener('keydown', function(e) {
       if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
         e.preventDefault();
@@ -3543,12 +3552,6 @@ function initApp() {
     OverviewPage.render();
   });
 
-  // 6. 检查认证
-  if (!Auth.isAuthenticated()) {
-    showLogin();
-  } else {
-    showApp();
-  }
 }
 
 function showLogin() {
