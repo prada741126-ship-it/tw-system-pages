@@ -2380,7 +2380,6 @@ var MemberPage = (function() {
           var m = Members.getById(tx.memberId);
           var hall = VIP_HALLS.find(function(h) { return h.id === tx.vipHallId; });
           var isNeg = (tx.upDown || 0) < 0;
-          var isWin = (tx.totalSettlement || 0) >= 0;
 
           html += '<div class="mb-card">';
 
@@ -2403,10 +2402,10 @@ var MemberPage = (function() {
           html += '<div class="mb-card-row"><span class="mb-card-label">洗碼數</span><span class="mb-card-val">' + fmtCardNum(tx.washCode || 0) + '</span></div>';
           html += '<div class="mb-card-row"><span class="mb-card-label">倍率</span><span class="mb-card-val">' + (tx.rate1 || 0) + ' / ' + (tx.rate2 || 0) + '</span></div>';
           html += '<div class="mb-card-row"><span class="mb-card-label">返水</span><span class="mb-card-val">' + (tx.rebate1 || 0) + ' / ' + (tx.rebate2 || 0) + '</span></div>';
-          html += '<div class="mb-card-row"><span class="mb-card-label">退傭1</span><span class="mb-card-val">' + fmtCardNum(tx.commission1 || 0) + '</span></div>';
-          html += '<div class="mb-card-row"><span class="mb-card-label">退傭2</span><span class="mb-card-val">' + fmtCardNum(tx.commission2 || 0) + '</span></div>';
-          html += '<div class="mb-card-row"><span class="mb-card-label">NT輸贏</span><span class="mb-card-val ' + ((tx.ntResult || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(tx.ntResult || 0) + '</span></div>';
-          html += '<div class="mb-card-row"><span class="mb-card-label">小計</span><span class="mb-card-val ' + ((tx.subtotal || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(tx.subtotal || 0) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">退傭1</span><span class="mb-card-val">' + fmtNT(tx.commission1) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">退傭2</span><span class="mb-card-val">' + fmtNT(tx.commission2) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">NT輸贏</span><span class="mb-card-val ' + ((tx.ntResult || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + fmtNT(tx.ntResult) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">小計</span><span class="mb-card-val ' + ((tx.subtotal || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + fmtNT(tx.subtotal) + '</span></div>';
           html += '</div>';
 
           // 第三區：開銷明細
@@ -2432,11 +2431,12 @@ var MemberPage = (function() {
           html += '</div>';
 
           // 底部：總交收 + 操作
-          var isWin = (tx.totalSettlement || 0) >= 0;
+          var totalNT = calcTotalNT(tx);
+          var isWin = totalNT >= 0;
           html += '<div class="mb-card-footer">';
           html += '<div class="mb-card-total">';
           html += '<span class="mb-card-label">總交收金額NT</span>';
-          html += '<span class="mb-card-total-val ' + (isWin ? 'num-positive' : 'num-negative') + '">' + fmtCardNum(tx.totalSettlement || 0) + '</span>';
+          html += '<span class="mb-card-total-val ' + (isWin ? 'num-positive' : 'num-negative') + '">' + fmtCardNum(totalNT) + '</span>';
           html += '</div>';
           html += '<div class="mb-card-actions">';
           html += '<button class="btn-sm" onclick="MemberPage.editTx(\'' + tx.id + '\')">編輯</button>';
@@ -2451,7 +2451,7 @@ var MemberPage = (function() {
 
       // 合計行
       if (mtxs.length > 0) {
-        var totalSettle = mtxs.reduce(function(s, t) { return s + (t.totalSettlement || 0); }, 0);
+        var totalSettle = mtxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
         var totalWash = mtxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
         html += '<div class="summary-row">';
         html += '<span>總洗碼: ' + fmtCardNum(totalWash) + ' 萬</span>';
@@ -2516,6 +2516,14 @@ var MemberPage = (function() {
     var v = Math.round(n * 1000) / 1000;
     if (Math.abs(v - Math.round(v)) < 1e-6) return Math.round(v).toLocaleString();
     return v.toFixed(3).replace(/\.?0+$/, '');
+  }
+  // 萬 → 元（×10000）
+  function fmtNT(n) {
+    return fmtCardNum((n || 0) * 10000);
+  }
+  // 總交收 = 小計×10000 + 開銷NT
+  function calcTotalNT(tx) {
+    return (tx.subtotal || 0) * 10000 + (tx.expensesNT || 0);
   }
 
   function calcUpDown() {
