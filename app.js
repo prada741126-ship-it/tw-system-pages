@@ -2250,7 +2250,16 @@ var OverviewPage = (function() {
       html += '<option value="' + h.id + '"' + sel + '>' + h.name + '</option>';
     });
     html += '</select></div>';
-    html += '<div class="form-group" style="margin-top:4px;"><label>新增成员</label>';
+    html += '<div class="form-group"><label>成員</label>';
+    html += '<select id="trip-members-edit" class="form-input" multiple size="6">';
+    members.forEach(function(m) {
+      var memberIds = trip.memberIds || [];
+      if (!Array.isArray(memberIds)) memberIds = Object.values(memberIds);
+      var sel = memberIds.indexOf(m.id) >= 0 ? ' selected' : '';
+      html += '<option value="' + m.id + '"' + sel + '>' + m.id + ' ' + m.name + '</option>';
+    });
+    html += '</select></div>';
+    html += '<div class="form-group" style="margin-top:4px;"><label>新增成員</label>';
     html += '<div style="display:flex;gap:8px;">';
     html += '<select id="trip-add-member-edit" class="form-input" style="flex:1;">';
     html += '<option value="">選擇會員...</option>';
