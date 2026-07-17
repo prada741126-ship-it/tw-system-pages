@@ -293,6 +293,15 @@ var DEFAULT_SETTINGS = {
   vipHalls: VIP_HALLS,
   roomFeeRate: 150,
   extraProfit: 0,
+  ticketPrices: {
+    waterDance: [
+      { name: '貴賓席', guestPrice: 1298, ourPrice: 1038 },
+      { name: '豪華席', guestPrice: 1098, ourPrice: 878 },
+      { name: '尊享席', guestPrice: 898, ourPrice: 718 },
+      { name: '景觀席', guestPrice: 698, ourPrice: 558 },
+    ],
+    waterPark: { guestPrice: 450, ourPrice: 406 },
+  },
 };
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -1811,11 +1820,21 @@ var Settings = (function() {
     var s = get();
     return (s.extraProports || {})[month] || 0;
   }
+  function getTicketPrices() {
+    var s = get();
+    return s.ticketPrices || DEFAULT_SETTINGS.ticketPrices;
+  }
+  function updateTicketPrices(tp) {
+    var s = get();
+    s.ticketPrices = tp;
+    save(s);
+  }
   return {
     load: load, save: save, get: get,
     getMonthlyRate: getMonthlyRate, setMonthlyRate: setMonthlyRate,
     getVipHalls: getVipHalls, updateVipHalls: updateVipHalls,
     setExtraProfit: setExtraProfit, getExtraProfit: getExtraProfit,
+    getTicketPrices: getTicketPrices, updateTicketPrices: updateTicketPrices,
   };
 })();
 
@@ -3857,6 +3876,39 @@ var SettingsPage = (function() {
     });
     html += '</tbody></table></div>';
 
+    // 門票預設價格
+    var tp = Settings.getTicketPrices();
+    html += '<div class="card">';
+    html += '<div class="card-header"><h3>門票預設價格</h3></div>';
+
+    // 水舞間
+    html += '<h4 style="margin:8px 0 4px;font-size:var(--font-size-sm);color:var(--text-secondary);">水舞間</h4>';
+    html += '<table class="data-table"><thead><tr>';
+    html += '<th>席別</th><th>客人購買價</th><th>我們購買價</th>';
+    html += '</tr></thead><tbody>';
+    (tp.waterDance || []).forEach(function(t, i) {
+      html += '<tr>';
+      html += '<td>' + t.name + '</td>';
+      html += '<td><input type="number" step="1" class="form-input compact" value="' + t.guestPrice + '" onchange="SettingsPage.updateTicket(\'waterDance\',' + i + ',\'guestPrice\',this.value)"></td>';
+      html += '<td><input type="number" step="1" class="form-input compact" value="' + t.ourPrice + '" onchange="SettingsPage.updateTicket(\'waterDance\',' + i + ',\'ourPrice\',this.value)"></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+
+    // 水上樂園
+    var wp = tp.waterPark || { guestPrice: 450, ourPrice: 406 };
+    html += '<h4 style="margin:12px 0 4px;font-size:var(--font-size-sm);color:var(--text-secondary);">水上樂園手帶</h4>';
+    html += '<table class="data-table"><thead><tr>';
+    html += '<th>項目</th><th>客人購買價</th><th>我們購買價</th>';
+    html += '</tr></thead><tbody>';
+    html += '<tr>';
+    html += '<td>手帶</td>';
+    html += '<td><input type="number" step="1" class="form-input compact" value="' + wp.guestPrice + '" onchange="SettingsPage.updateTicket(\'waterPark\',null,\'guestPrice\',this.value)"></td>';
+    html += '<td><input type="number" step="1" class="form-input compact" value="' + wp.ourPrice + '" onchange="SettingsPage.updateTicket(\'waterPark\',null,\'ourPrice\',this.value)"></td>';
+    html += '</tr>';
+    html += '</tbody></table>';
+    html += '</div>';
+
     // 修改密码
     html += '<div class="card">';
     html += '<div class="card-header"><h3>修改密碼</h3></div>';
@@ -3896,7 +3948,19 @@ var SettingsPage = (function() {
     });
   }
 
-  return { render: render, saveRate: saveRate, updateHall: updateHall, changePwd: changePwd };
+  function updateTicket(category, idx, field, value) {
+    var tp = Settings.getTicketPrices();
+    var val = parseFloat(value);
+    if (category === 'waterDance') {
+      tp.waterDance[idx][field] = val;
+    } else {
+      tp.waterPark[field] = val;
+    }
+    Settings.updateTicketPrices(tp);
+    Toast.success('價格已更新');
+  }
+
+  return { render: render, saveRate: saveRate, updateHall: updateHall, updateTicket: updateTicket, changePwd: changePwd };
 })();
 
 
