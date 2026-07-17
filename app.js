@@ -2383,7 +2383,8 @@ var MemberPage = (function() {
     // 团选择器 + 代理筛选
     html += '<div class="card">';
     html += '<div class="card-header"><h3>帳務</h3>';
-    html += '<div style="display:flex;gap:8px;align-items:center;">';
+    html += '<button class="btn btn-primary" style="margin-left:8px;" onclick="MemberPage.showAddAgent()">+ 新增代理</button>';
+    html += '<div style="display:flex;gap:8px;align-items:center;margin-left:auto;">';
     html += '<select id="member-trip-select" class="form-input" style="width:auto;" onchange="MemberPage.selectTrip(this.value)">';
     html += '<option value="">選擇團...</option>';
     trips.forEach(function(trip) {
@@ -2626,9 +2627,6 @@ var MemberPage = (function() {
       html += '<div class="mb-ap-stat"><label>輸贏數</label><span class="' + (totalWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(totalWinLoss) + '</span></div>';
       html += '</div>';
 
-      // 新增代理按鈕
-      html += '<button class="btn-sm" style="margin-top:8px;width:100%;" onclick="MemberPage.showAddAgent()">+ 新增代理</button>';
-
     } else {
       // 全部代理 — 顯示各代理匯總 + 整體統計
       var agents = Agents.getAll();
@@ -2636,7 +2634,6 @@ var MemberPage = (function() {
 
       if (agents.length === 0) {
         html += '<div class="empty-state">無代理資料</div>';
-        html += '<button class="btn-sm" style="margin-top:8px;width:100%;" onclick="MemberPage.showAddAgent()">+ 新增代理</button>';
       } else {
         // 整體統計卡片
         var totalWash = 0, totalWinLoss = 0, totalSettle = 0, totalRooms = 0, totalMembers = 0;
@@ -2690,9 +2687,6 @@ var MemberPage = (function() {
         html += '<td class="num ' + (grandSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(grandSettle) + '</td>';
         html += '</tr>';
         html += '</tbody></table>';
-
-        // 新增代理按鈕
-        html += '<button class="btn-sm" style="margin-top:8px;width:100%;" onclick="MemberPage.showAddAgent()">+ 新增代理</button>';
       }
     }
 
