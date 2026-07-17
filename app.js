@@ -2604,7 +2604,7 @@ var MemberPage = (function() {
         });
         html += '<tr class="total-row">';
         html += '<td colspan="2">合計</td>';
-        html += '<td class="num ' + (sumSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.round(sumSettle)) + '</td>';
+        html += '<td class="num ' + (sumSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.trunc(sumSettle / 100) * 100) + '</td>';
         html += '</tr>';
         html += '</tbody></table>';
       } else {
@@ -2620,7 +2620,7 @@ var MemberPage = (function() {
 
       html += '<div class="mb-ap-stats">';
       html += '<div class="mb-ap-stat"><label>總洗碼</label><span>' + fmtCardNum(totalWash) + ' 萬</span></div>';
-      html += '<div class="mb-ap-stat"><label>總交收</label><span class="' + (totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.round(totalSettle)) + '</span></div>';
+      html += '<div class="mb-ap-stat"><label>總交收</label><span class="' + (totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.trunc(totalSettle / 100) * 100) + '</span></div>';
       html += '<div class="mb-ap-stat"><label>訂房數</label><span>' + roomCount + ' 間</span></div>';
       html += '<div class="mb-ap-stat"><label>會員數</label><span>' + memberCount + '</span></div>';
       html += '</div>';
@@ -2650,7 +2650,7 @@ var MemberPage = (function() {
 
         html += '<div class="mb-ap-stats">';
         html += '<div class="mb-ap-stat"><label>總洗碼</label><span>' + fmtCardNum(totalWash) + ' 萬</span></div>';
-        html += '<div class="mb-ap-stat"><label>總交收</label><span class="' + (totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.round(totalSettle)) + '</span></div>';
+        html += '<div class="mb-ap-stat"><label>總交收</label><span class="' + (totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.trunc(totalSettle / 100) * 100) + '</span></div>';
         html += '<div class="mb-ap-stat"><label>訂房數</label><span>' + totalRooms + ' 間</span></div>';
         html += '<div class="mb-ap-stat"><label>會員數</label><span>' + totalMembers + '</span></div>';
         html += '</div>';
@@ -2675,7 +2675,7 @@ var MemberPage = (function() {
         html += '<tr class="total-row">';
         html += '<td>合計</td>';
         html += '<td class="num">' + fmtCardNum(grandWash) + '</td>';
-        html += '<td class="num ' + (grandSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.round(grandSettle)) + '</td>';
+        html += '<td class="num ' + (grandSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.trunc(grandSettle / 100) * 100) + '</td>';
         html += '</tr>';
         html += '</tbody></table>';
       }
