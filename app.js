@@ -2599,7 +2599,7 @@ var MemberPage = (function() {
     var html = '';
     _expenseRows.forEach(function(row, i) {
       html += '<div class="form-row expense-row">';
-      html += '<select class="form-input" style="flex:1.5;" onchange="MemberPage._updExpType(' + i + ',this.value)">';
+      html += '<select class="form-input" style="flex:1;min-width:100px;" onchange="MemberPage._updExpType(' + i + ',this.value)">';
       html += '<option value="other"' + (row.ticketType === 'other' || !row.ticketType ? ' selected' : '') + '>其他</option>';
       (tp.waterDance || []).forEach(function(t, j) {
         var val = 'wd-' + j;
@@ -2608,10 +2608,15 @@ var MemberPage = (function() {
       var wp = tp.waterPark || { guestPrice: 450 };
       html += '<option value="wp"' + (row.ticketType === 'wp' ? ' selected' : '') + '>水上樂園手帶 (' + wp.guestPrice + ')</option>';
       html += '</select>';
-      html += '<input type="number" step="1" min="1" placeholder="數量" class="form-input" style="width:70px;flex:0 0 70px;" value="' + (row.quantity || 1) + '" onchange="MemberPage._updExp(' + i + ',\'quantity\',this.value)">';
-      html += '<input type="number" placeholder="金額" class="form-input" value="' + (row.amountHK || 0) + '" onchange="MemberPage._updExp(' + i + ',\'amountHK\',this.value)">';
-      html += '<input type="number" step="0.01" placeholder="匯率" class="form-input" style="width:70px;flex:0 0 70px;" value="' + (row.exchangeRate || 4.2) + '" onchange="MemberPage._updExp(' + i + ',\'exchangeRate\',this.value)">';
-      html += '<button class="btn-sm btn-danger" onclick="MemberPage._delExp(' + i + ')">×</button>';
+      if (row.ticketType === 'other' || !row.ticketType) {
+        html += '<input type="text" placeholder="項目名稱" class="form-input" style="flex:1;min-width:80px;" value="' + (row.name || '') + '" onchange="MemberPage._updExp(' + i + ',\'name\',this.value)">';
+      } else {
+        html += '<span style="flex:1;min-width:80px;display:flex;align-items:center;font-size:var(--font-size-sm);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (row.name || '') + '</span>';
+      }
+      html += '<input type="number" step="1" min="1" placeholder="數量" class="form-input" style="width:60px;flex:0 0 60px;" value="' + (row.quantity || 1) + '" onchange="MemberPage._updExp(' + i + ',\'quantity\',this.value)">';
+      html += '<input type="number" placeholder="金額" class="form-input" style="width:80px;flex:0 0 80px;" value="' + (row.amountHK || 0) + '" onchange="MemberPage._updExp(' + i + ',\'amountHK\',this.value)">';
+      html += '<input type="number" step="0.01" placeholder="匯率" class="form-input" style="width:60px;flex:0 0 60px;" value="' + (row.exchangeRate || 4.2) + '" onchange="MemberPage._updExp(' + i + ',\'exchangeRate\',this.value)">';
+      html += '<button class="btn-sm btn-danger" onclick="MemberPage._delExp(' + i + ')" style="flex:0 0 32px;padding:4px;">×</button>';
       html += '</div>';
     });
     container.innerHTML = html;
@@ -2624,7 +2629,7 @@ var MemberPage = (function() {
     if (val === 'other') {
       _expenseRows[i].name = '';
       _expenseRows[i].unitPrice = 0;
-      _expenseRows[i].amountHK = 0;
+      // amountHK 不強制歸零，保留讓使用者自行編輯
     } else if (val === 'wp') {
       var wp = tp.waterPark || { guestPrice: 450, ourPrice: 406 };
       _expenseRows[i].name = '水上樂園手帶';
