@@ -555,12 +555,13 @@ function calcCommission2(washCode, rate2, rebate2) {
   return (washCode || 0) * (rate2 || 0) * (rebate2 || 0);
 }
 
-// 开销NT = Σ(amountHK × exchangeRate)
+// 开销NT = Σ(amountHK × exchangeRate) 四捨五入
 function calcExpensesNT(expenses) {
   if (!expenses || !expenses.length) return 0;
-  return expenses.reduce(function(sum, e) {
+  var total = expenses.reduce(function(sum, e) {
     return sum + (e.amountHK || 0) * (e.exchangeRate || 0);
   }, 0);
+  return Math.round(total);
 }
 
 // 完整计算链
@@ -571,8 +572,8 @@ function calcMemberTx(input) {
   var comm2 = calcCommission2(input.washCode, input.rate2, input.rebate2);
   var subtotal = ntResult + comm1 + comm2;
   var expensesNT = calcExpensesNT(input.expenses);
-  // 總交收NT = 小計 + 開銷NT
-  var totalSettlement = subtotal + expensesNT;
+  // 總交收NT = 小計 - 開銷NT
+  var totalSettlement = subtotal - expensesNT;
   var settlementAmount = roundDown(totalSettlement, -2);
   var verifyStatus = verifyUpDown(upDown, input.customerUp, input.customerDown);
 
@@ -2620,10 +2621,9 @@ var MemberPage = (function() {
 
       html += '<div class="mb-ap-stats">';
       html += '<div class="mb-ap-stat"><label>總洗碼</label><span>' + fmtCardNum(totalWash) + ' 萬</span></div>';
-      html += '<div class="mb-ap-stat"><label>總輸贏</label><span class="' + (totalWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(totalWinLoss) + '</span></div>';
       html += '<div class="mb-ap-stat"><label>總交收</label><span class="' + (totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(totalSettle) + '</span></div>';
       html += '<div class="mb-ap-stat"><label>訂房數</label><span>' + roomCount + ' 間</span></div>';
-      html += '<div class="mb-ap-stat"><label>會員數</label><span>' + memberCount + '</span></div>';
+      html += '<div class="mb-ap-stat"><label>輸贏數</label><span class="' + (totalWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(totalWinLoss) + '</span></div>';
       html += '</div>';
 
       // 新增代理按鈕
@@ -2665,30 +2665,22 @@ var MemberPage = (function() {
 
         // 各代理匯總表
         html += '<table class="mb-ap-table"><thead><tr>';
-        html += '<th>代理</th><th class="num">洗碼</th><th class="num">輸贏</th><th class="num">交收</th><th class="num">房</th><th class="num">會</th>';
+        html += '<th>代理</th><th class="num">洗碼</th><th class="num">輸贏</th><th class="num">交收</th>';
         html += '</tr></thead><tbody>';
-        var grandWash = 0, grandWinLoss = 0, grandSettle = 0, grandRooms = 0, grandMembers = 0;
+        var grandWash = 0, grandWinLoss = 0, grandSettle = 0;
         agents.forEach(function(ag) {
           var agTxs = tripMtxs.filter(function(t) { return t.agentId === ag.id; });
           var agWash = agTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
           var agWinLoss = agTxs.reduce(function(s, t) { return s + (t.ntResult || 0) * 10000; }, 0);
           var agSettle = agTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
-          var agBookings = allBookings.filter(function(b) { return b.agentId === ag.id; });
-          var agMemberIds = new Set();
-          agTxs.forEach(function(t) { agMemberIds.add(t.memberId); });
-          var agMemberCount = agMemberIds.size;
           grandWash += agWash;
           grandWinLoss += agWinLoss;
           grandSettle += agSettle;
-          grandRooms += agBookings.length;
-          grandMembers += agMemberCount;
           html += '<tr style="cursor:pointer;" onclick="MemberPage.selectAgent(\'' + ag.id + '\')">';
           html += '<td>' + ag.name + '</td>';
           html += '<td class="num">' + fmtCardNum(agWash) + '</td>';
           html += '<td class="num ' + (agWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(agWinLoss) + '</td>';
           html += '<td class="num ' + (agSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(agSettle) + '</td>';
-          html += '<td class="num">' + agBookings.length + '</td>';
-          html += '<td class="num">' + agMemberCount + '</td>';
           html += '</tr>';
         });
         html += '<tr class="total-row">';
@@ -2696,9 +2688,6 @@ var MemberPage = (function() {
         html += '<td class="num">' + fmtCardNum(grandWash) + '</td>';
         html += '<td class="num ' + (grandWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(grandWinLoss) + '</td>';
         html += '<td class="num ' + (grandSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(grandSettle) + '</td>';
-        html += '<td class="num">' + grandRooms + '</td>';
-        html += '<td class="num">' + grandMembers + '</td>';
-        html += '</tr>';
         html += '</tr>';
         html += '</tbody></table>';
 
