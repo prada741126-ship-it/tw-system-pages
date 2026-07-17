@@ -3135,12 +3135,11 @@ var ShareholderPage = (function() {
     halls.forEach(function(hall) {
       var cashPct = ((hall.cashRate || hall.rate) * 100).toFixed(2);
       var rebatePct = (hall.rebateRate * 100).toFixed(2);
-      var guestPct = ((hall.guestRate || 0.01) * 100).toFixed(2);
       var totalPct = (hall.rate * 100).toFixed(2);
       html += '<div class="sh-rate-pill ' + hallClass(hall.id) + '" onclick="ShareholderPage.editRate(\'' + hall.id + '\')">';
       html += '<span class="sh-rate-dot"></span>';
       html += '<span class="sh-rate-name">' + hall.name + '</span>';
-      html += '<span class="sh-rate-vals">退傭<b>' + totalPct + '</b>/現結<b>' + cashPct + '</b>/月退<b>' + rebatePct + '</b>/客退<b>' + guestPct + '</b></span>';
+      html += '<span class="sh-rate-vals">退傭<b>' + totalPct + '</b>/現結<b>' + cashPct + '</b>/月退<b>' + rebatePct + '</b></span>';
       html += '</div>';
     });
     html += '</div>';
@@ -3370,8 +3369,8 @@ var ShareholderPage = (function() {
     html += '<div class="form-group"><label>退傭(%)</label><input type="number" step="0.01" class="form-input" value="' + (hall.rate * 100).toFixed(2) + '" id="rate-total" readonly></div>';
     html += '<div class="form-group"><label>現結(%)</label><input type="number" step="0.01" class="form-input" value="' + ((hall.cashRate || hall.rate) * 100).toFixed(2) + '" id="rate-cash" oninput="ShareholderPage.calcTotalRate()"></div>';
     html += '<div class="form-group"><label>月退(%)</label><input type="number" step="0.01" class="form-input" value="' + (hall.rebateRate * 100).toFixed(2) + '" id="rate-rebate" oninput="ShareholderPage.calcTotalRate()"></div>';
-    html += '<div class="form-group"><label>客人退佣(%)</label><input type="number" step="0.01" class="form-input" value="' + ((hall.guestRate || 0.01) * 100).toFixed(2) + '" id="rate-guest" oninput="ShareholderPage.calcTotalRate()"></div>';
     html += '</div>';
+    html += '<input type="hidden" id="rate-guest" value="' + ((hall.guestRate || 0.01) * 100).toFixed(2) + '">';
     html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);">退傭 = 現結 + 月退 + 客人退佣（自動計算）</p>';
     html += '<div style="text-align:right;margin-top:16px;"><button class="btn btn-primary" onclick="ShareholderPage.saveRate(\'' + hallId + '\')">儲存</button></div>';
     Modal.open('編輯費率 — ' + hall.name, html);
