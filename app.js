@@ -2445,13 +2445,13 @@ var MemberPage = (function() {
     VIP_HALLS.forEach(function(h) { html += '<option value="' + h.id + '">' + h.name + '</option>'; });
     html += '</select></div>';
     html += '<div class="form-row">';
-    html += '<div class="form-group"><label>出碼(CR)(萬)</label><input type="number" step="0.001" id="tx-out" class="form-input"></div>';
-    html += '<div class="form-group"><label>回碼(寄碼)(萬)</label><input type="number" step="0.001" id="tx-back" class="form-input"></div>';
+    html += '<div class="form-group"><label>出碼(CR)(萬)</label><input type="number" step="0.001" id="tx-out" class="form-input" oninput="MemberPage.calcUpDown()"></div>';
+    html += '<div class="form-group"><label>回碼(寄碼)(萬)</label><input type="number" step="0.001" id="tx-back" class="form-input" oninput="MemberPage.calcUpDown()"></div>';
     html += '</div>';
     html += '<div class="form-row">';
-    html += '<div class="form-group"><label>客上(萬)</label><input type="number" step="0.001" id="tx-up" class="form-input" value="0"></div>';
-    html += '<div class="form-group"><label>客下(萬)</label><input type="number" step="0.001" id="tx-down" class="form-input" value="0"></div>';
-    html += '<div class="form-group"><label>洗碼(萬)</label><input type="number" step="0.001" id="tx-wash" class="form-input"></div>';
+    html += '<div class="form-group"><label>客上(萬)</label><input type="number" step="0.001" id="tx-up" class="form-input" value="0" oninput="MemberPage.calcWash()"></div>';
+    html += '<div class="form-group"><label>客下(萬)</label><input type="number" step="0.001" id="tx-down" class="form-input" value="0" oninput="MemberPage.calcWash()"></div>';
+    html += '<div class="form-group"><label>洗碼(萬)</label><input type="number" step="0.001" id="tx-wash" class="form-input" readonly></div>';
     html += '</div>';
     html += '<div id="tx-expenses"></div>';
     html += '<button class="btn-sm" onclick="MemberPage.addExpenseRow()">+ 開銷</button>';
@@ -2461,6 +2461,29 @@ var MemberPage = (function() {
   }
 
   var _expenseRows = [];
+
+  function calcUpDown() {
+    var out = parseFloat(document.getElementById('tx-out').value) || 0;
+    var back = parseFloat(document.getElementById('tx-back').value) || 0;
+    var diff = back - out;
+    var upEl = document.getElementById('tx-up');
+    var downEl = document.getElementById('tx-down');
+    if (diff >= 0) {
+      if (upEl) upEl.value = diff.toFixed(3);
+      if (downEl) downEl.value = '0';
+    } else {
+      if (upEl) upEl.value = '0';
+      if (downEl) downEl.value = (-diff).toFixed(3);
+    }
+    calcWash();
+  }
+  function calcWash() {
+    var up = parseFloat(document.getElementById('tx-up').value) || 0;
+    var down = parseFloat(document.getElementById('tx-down').value) || 0;
+    var washEl = document.getElementById('tx-wash');
+    if (washEl) washEl.value = (up + down).toFixed(3);
+  }
+
   function addExpenseRow() {
     _expenseRows.push({ name: '', amountHK: 0, exchangeRate: 4.2 });
     renderExpenseRows();
@@ -2554,6 +2577,7 @@ var MemberPage = (function() {
     showAddTx: showAddTx, saveTx: saveTx,
     editTx: editTx, saveEditTx: saveEditTx, delTx: delTx,
     addExpenseRow: addExpenseRow, _updExp: _updExp, _delExp: _delExp,
+    calcUpDown: calcUpDown, calcWash: calcWash,
   };
 })();
 
