@@ -149,10 +149,10 @@ var EVENTS = {
 // ============================================================================
 var VIP_HALLS = [
   // rate = 退傭 = cashRate + rebateRate
-  { id: 'lyi', name: '勵盈會', rate: 0.0123, cashRate: 0.0118, hasMonthlyRebate: true, rebateRate: 0.0005 },
-  { id: 'yub', name: '御匾會', rate: 0.0120, cashRate: 0.0115, hasMonthlyRebate: true, rebateRate: 0.0005 },
-  { id: 'jm1', name: '金門1',  rate: 0.0123, cashRate: 0.0115, hasMonthlyRebate: true, rebateRate: 0.0008 },
-  { id: 'jm8', name: '金門8',  rate: 0.0118, cashRate: 0.0115, hasMonthlyRebate: true, rebateRate: 0.0003 },
+  { id: 'lyi', name: '勵盈會', rate: 0.0123, cashRate: 0.0018, hasMonthlyRebate: true, rebateRate: 0.0105 },
+  { id: 'yub', name: '御匾會', rate: 0.0120, cashRate: 0.0015, hasMonthlyRebate: true, rebateRate: 0.0105 },
+  { id: 'jm1', name: '金門1',  rate: 0.0123, cashRate: 0.0023, hasMonthlyRebate: true, rebateRate: 0.0100 },
+  { id: 'jm8', name: '金門8',  rate: 0.0118, cashRate: 0.0018, hasMonthlyRebate: true, rebateRate: 0.0100 },
 ];
 
 // ============================================================================
@@ -3176,8 +3176,8 @@ var ShareholderPage = (function() {
     if (shareholders.length > 0 && totalShares > 0) {
       html += '<table class="sh-profit-table"><thead><tr>';
       html += '<th>股東</th><th>持股</th><th>洗碼(萬)</th>';
-      html += '<th>資金股50%(HK)</th><th>貢獻可得(HK)</th><th>額外收入(HK)</th>';
-      html += '<th>合計應付(HK)</th><th>合計應付(TW)</th>';
+      html += '<th class="num">資金股50%(HK)</th><th class="num">貢獻可得(HK)</th><th class="num">額外收入(HK)</th>';
+      html += '<th class="num">合計應付(HK)</th><th class="num">合計應付(TW)</th>';
       html += '</tr></thead><tbody>';
 
       var sumHK = 0, sumTW = 0;
