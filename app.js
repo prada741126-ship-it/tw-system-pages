@@ -3270,9 +3270,21 @@ var ShareholderPage = (function() {
     var html = '';
     html += '<div class="sh-page">';
 
-    // ===== 1. 費率條件藥丸條 =====
-    html += '<div class="sh-rate-bar">';
-    html += '<span class="sh-rate-bar-label">費率條件</span>';
+    // ===== 1. 摘要條 + 費率條件（合併） =====
+    html += '<div class="sh-summary-bar">';
+    html += '<div class="sh-summary-cell"><label>當月總洗碼</label><span>' + fmtWan(totalWash) + ' 萬</span></div>';
+    html += '<div class="sh-summary-divider"></div>';
+    html += '<div class="sh-summary-cell"><label>總盈利(HK)</label><span>' + fmtHK(totalProfit) + '</span></div>';
+    html += '<div class="sh-summary-divider"></div>';
+    html += '<div class="sh-summary-cell"><label>總月退費(HK)</label><span>' + fmtHK(totalRebate) + '</span></div>';
+    html += '<div class="sh-summary-divider"></div>';
+    html += '<div class="sh-summary-cell"><label>額外收入(HK)</label><span>' + fmtHK(totalExtra) + '</span></div>';
+    html += '<div class="sh-summary-divider"></div>';
+    html += '<div class="sh-summary-cell"><label>股東數</label><span>' + shareholders.length + '</span></div>';
+    // 費率條件藥丸（接在摘要後方）
+    html += '<div class="sh-summary-divider"></div>';
+    html += '<div class="sh-rate-pills-inline">';
+    html += '<span class="sh-rate-bar-label">費率</span>';
     halls.forEach(function(hall) {
       var cashPct = ((hall.cashRate || hall.rate) * 100).toFixed(2);
       var rebatePct = (hall.rebateRate * 100).toFixed(2);
@@ -3284,18 +3296,6 @@ var ShareholderPage = (function() {
       html += '</div>';
     });
     html += '</div>';
-
-    // ===== 2. 摘要條 =====
-    html += '<div class="sh-summary-bar">';
-    html += '<div class="sh-summary-cell"><label>當月總洗碼</label><span>' + fmtWan(totalWash) + ' 萬</span></div>';
-    html += '<div class="sh-summary-divider"></div>';
-    html += '<div class="sh-summary-cell"><label>總盈利(HK)</label><span>' + fmtHK(totalProfit) + '</span></div>';
-    html += '<div class="sh-summary-divider"></div>';
-    html += '<div class="sh-summary-cell"><label>總月退費(HK)</label><span>' + fmtHK(totalRebate) + '</span></div>';
-    html += '<div class="sh-summary-divider"></div>';
-    html += '<div class="sh-summary-cell"><label>額外收入(HK)</label><span>' + fmtHK(totalExtra) + '</span></div>';
-    html += '<div class="sh-summary-divider"></div>';
-    html += '<div class="sh-summary-cell"><label>股東數</label><span>' + shareholders.length + '</span></div>';
     html += '</div>';
 
     // ===== 3. 分潤明細 =====
