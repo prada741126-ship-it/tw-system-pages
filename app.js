@@ -2438,11 +2438,12 @@ var MemberPage = (function() {
             html += '<div class="mb-card-row"><span class="mb-card-label">—</span></div>';
           } else {
             html += '<div class="mb-card-expense-table">';
-            html += '<div class="mb-card-expense-head"><span>項目</span><span>HK</span><span>匯率</span><span>NT</span></div>';
+            html += '<div class="mb-card-expense-head"><span>項目</span><span>金額</span><span>匯率</span><span>NT</span></div>';
             expenses.forEach(function(e) {
               var nt = (e.amountHK || 0) * (e.exchangeRate || 0);
+              var qtyLabel = (e.quantity && e.quantity > 1) ? ' ×' + e.quantity : '';
               html += '<div class="mb-card-expense-row">';
-              html += '<span>' + (e.name || '') + '</span>';
+              html += '<span>' + (e.name || '') + qtyLabel + '</span>';
               html += '<span>' + fmtCardNum(e.amountHK || 0) + '</span>';
               html += '<span>' + (e.exchangeRate || 0) + '</span>';
               html += '<span>' + fmtCardNum(nt) + '</span>';
@@ -2500,9 +2501,10 @@ var MemberPage = (function() {
     var trip = Trips.getById(_selectedTrip);
     if (!trip) return;
     var members = Members.getAll();
+    var defaultM = members.length > 0 ? members[0] : { rate1: 0, rebate1: 0, rate2: 0, rebate2: 0 };
     var html = '';
     html += '<div class="form-group"><label>會員</label>';
-    html += '<select id="tx-member" class="form-input">';
+    html += '<select id="tx-member" class="form-input" onchange="MemberPage.onMemberChange()">';
     members.forEach(function(m) {
       html += '<option value="' + m.id + '">' + m.id + ' ' + m.name + ' (倍率:' + m.rate1 + '/' + m.rate2 + ')</option>';
     });
@@ -2521,16 +2523,26 @@ var MemberPage = (function() {
     html += '<div class="form-group"><label>洗碼(萬)</label><input type="number" step="0.001" id="tx-wash" class="form-input"></div>';
     html += '</div>';
     html += '<div class="form-row">';
-    html += '<div class="form-group"><label>倍率1</label><input type="number" step="0.01" id="tx-rate1" class="form-input" value="' + m.rate1 + '"></div>';
-    html += '<div class="form-group"><label>返水1</label><input type="number" step="0.001" id="tx-rebate1" class="form-input" value="' + m.rebate1 + '"></div>';
-    html += '<div class="form-group"><label>倍率2</label><input type="number" step="0.01" id="tx-rate2" class="form-input" value="' + m.rate2 + '"></div>';
-    html += '<div class="form-group"><label>返水2</label><input type="number" step="0.001" id="tx-rebate2" class="form-input" value="' + m.rebate2 + '"></div>';
+    html += '<div class="form-group"><label>倍率1</label><input type="number" step="0.01" id="tx-rate1" class="form-input" value="' + (defaultM.rate1 || 0) + '"></div>';
+    html += '<div class="form-group"><label>返水1</label><input type="number" step="0.001" id="tx-rebate1" class="form-input" value="' + (defaultM.rebate1 || 0) + '"></div>';
+    html += '<div class="form-group"><label>倍率2</label><input type="number" step="0.01" id="tx-rate2" class="form-input" value="' + (defaultM.rate2 || 0) + '"></div>';
+    html += '<div class="form-group"><label>返水2</label><input type="number" step="0.001" id="tx-rebate2" class="form-input" value="' + (defaultM.rebate2 || 0) + '"></div>';
     html += '</div>';
     html += '<div id="tx-expenses"></div>';
     html += '<button class="btn-sm" onclick="MemberPage.addExpenseRow()">+ 開銷</button>';
     html += '<div style="text-align:right;margin-top:16px;">';
     html += '<button class="btn btn-primary" onclick="MemberPage.saveTx()">儲存</button></div>';
     Modal.open('新增帳務', html);
+  }
+
+  function onMemberChange() {
+    var memberId = document.getElementById('tx-member').value;
+    var m = Members.getById(memberId);
+    if (!m) return;
+    var r1 = document.getElementById('tx-rate1'); if (r1) r1.value = m.rate1 || 0;
+    var rb1 = document.getElementById('tx-rebate1'); if (rb1) rb1.value = m.rebate1 || 0;
+    var r2 = document.getElementById('tx-rate2'); if (r2) r2.value = m.rate2 || 0;
+    var rb2 = document.getElementById('tx-rebate2'); if (rb2) rb2.value = m.rebate2 || 0;
   }
 
   var _expenseRows = [];
@@ -2577,25 +2589,71 @@ var MemberPage = (function() {
   }
 
   function addExpenseRow() {
-    _expenseRows.push({ name: '', amountHK: 0, exchangeRate: 4.2 });
+    _expenseRows.push({ name: '', ticketType: 'other', quantity: 1, unitPrice: 0, amountHK: 0, exchangeRate: 4.2 });
     renderExpenseRows();
   }
   function renderExpenseRows() {
     var container = document.getElementById('tx-expenses');
     if (!container) return;
+    var tp = Settings.getTicketPrices();
     var html = '';
     _expenseRows.forEach(function(row, i) {
       html += '<div class="form-row expense-row">';
-      html += '<input type="text" placeholder="項目" class="form-input" value="' + row.name + '" onchange="MemberPage._updExp(' + i + ',\'name\',this.value)">';
-      html += '<input type="number" placeholder="HK金額" class="form-input" value="' + row.amountHK + '" onchange="MemberPage._updExp(' + i + ',\'amountHK\',this.value)">';
-      html += '<input type="number" step="0.01" placeholder="匯率" class="form-input" value="' + row.exchangeRate + '" onchange="MemberPage._updExp(' + i + ',\'exchangeRate\',this.value)">';
+      html += '<select class="form-input" style="flex:1.5;" onchange="MemberPage._updExpType(' + i + ',this.value)">';
+      html += '<option value="other"' + (row.ticketType === 'other' || !row.ticketType ? ' selected' : '') + '>其他</option>';
+      (tp.waterDance || []).forEach(function(t, j) {
+        var val = 'wd-' + j;
+        html += '<option value="' + val + '"' + (row.ticketType === val ? ' selected' : '') + '>水舞間 ' + t.name + ' (' + t.guestPrice + ')</option>';
+      });
+      var wp = tp.waterPark || { guestPrice: 450 };
+      html += '<option value="wp"' + (row.ticketType === 'wp' ? ' selected' : '') + '>水上樂園手帶 (' + wp.guestPrice + ')</option>';
+      html += '</select>';
+      html += '<input type="number" step="1" min="1" placeholder="數量" class="form-input" style="width:70px;flex:0 0 70px;" value="' + (row.quantity || 1) + '" onchange="MemberPage._updExp(' + i + ',\'quantity\',this.value)">';
+      html += '<input type="number" placeholder="金額" class="form-input" value="' + (row.amountHK || 0) + '" onchange="MemberPage._updExp(' + i + ',\'amountHK\',this.value)">';
+      html += '<input type="number" step="0.01" placeholder="匯率" class="form-input" style="width:70px;flex:0 0 70px;" value="' + (row.exchangeRate || 4.2) + '" onchange="MemberPage._updExp(' + i + ',\'exchangeRate\',this.value)">';
       html += '<button class="btn-sm btn-danger" onclick="MemberPage._delExp(' + i + ')">×</button>';
       html += '</div>';
     });
     container.innerHTML = html;
   }
+  function _updExpType(i, val) {
+    if (!_expenseRows[i]) return;
+    _expenseRows[i].ticketType = val;
+    var tp = Settings.getTicketPrices();
+    var qty = _expenseRows[i].quantity || 1;
+    if (val === 'other') {
+      _expenseRows[i].name = '';
+      _expenseRows[i].unitPrice = 0;
+      _expenseRows[i].amountHK = 0;
+    } else if (val === 'wp') {
+      var wp = tp.waterPark || { guestPrice: 450, ourPrice: 406 };
+      _expenseRows[i].name = '水上樂園手帶';
+      _expenseRows[i].unitPrice = wp.guestPrice;
+      _expenseRows[i].amountHK = wp.guestPrice * qty;
+    } else if (val.indexOf('wd-') === 0) {
+      var idx = parseInt(val.substring(3));
+      var t = (tp.waterDance || [])[idx];
+      if (t) {
+        _expenseRows[i].name = '水舞間 ' + t.name;
+        _expenseRows[i].unitPrice = t.guestPrice;
+        _expenseRows[i].amountHK = t.guestPrice * qty;
+      }
+    }
+    renderExpenseRows();
+  }
   function _updExp(i, field, val) {
-    if (_expenseRows[i]) _expenseRows[i][field] = field === 'name' ? val : parseFloat(val) || 0;
+    if (!_expenseRows[i]) return;
+    if (field === 'name') {
+      _expenseRows[i][field] = val;
+    } else if (field === 'quantity') {
+      _expenseRows[i].quantity = parseInt(val) || 1;
+      if (_expenseRows[i].ticketType && _expenseRows[i].ticketType !== 'other' && _expenseRows[i].unitPrice) {
+        _expenseRows[i].amountHK = _expenseRows[i].unitPrice * _expenseRows[i].quantity;
+        renderExpenseRows();
+      }
+    } else {
+      _expenseRows[i][field] = parseFloat(val) || 0;
+    }
   }
   function _delExp(i) {
     _expenseRows.splice(i, 1);
@@ -2695,9 +2753,9 @@ var MemberPage = (function() {
 
   return {
     render: render, selectTrip: selectTrip,
-    showAddTx: showAddTx, saveTx: saveTx,
+    showAddTx: showAddTx, saveTx: saveTx, onMemberChange: onMemberChange,
     editTx: editTx, saveEditTx: saveEditTx, delTx: delTx,
-    addExpenseRow: addExpenseRow, _updExp: _updExp, _delExp: _delExp,
+    addExpenseRow: addExpenseRow, _updExp: _updExp, _updExpType: _updExpType, _delExp: _delExp,
     calcUpDown: calcUpDown, calcWash: calcWash,
   };
 })();
@@ -3158,6 +3216,37 @@ var ShareholderPage = (function() {
     var extraIncomes = ExtraIncome.getByMonth(_currentMonth);
     var extraProfit = extraIncomes.reduce(function(s, e) { return s + (e.amountHK || 0); }, 0);
 
+    // 門票利潤計算（水舞間/水上樂園）
+    var tp = Settings.getTicketPrices();
+    var ticketProfits = [];
+    var totalTicketProfit = 0;
+    monthTxs.forEach(function(tx) {
+      var expenses = tx.expenses || [];
+      expenses.forEach(function(e) {
+        if (!e.ticketType || e.ticketType === 'other') return;
+        var ourPrice = 0;
+        if (e.ticketType === 'wp') {
+          var wp = tp.waterPark || { ourPrice: 406 };
+          ourPrice = wp.ourPrice || 0;
+        } else if (e.ticketType.indexOf('wd-') === 0) {
+          var wdIdx = parseInt(e.ticketType.substring(3));
+          var wdTicket = (tp.waterDance || [])[wdIdx];
+          if (wdTicket) ourPrice = wdTicket.ourPrice || 0;
+        }
+        var qty = e.quantity || 1;
+        var profit = (e.amountHK || 0) - (ourPrice * qty);
+        var agent = Agents.getById(tx.agentId);
+        ticketProfits.push({
+          date: tx.date || '',
+          agentName: agent ? agent.name : (tx.agentId || ''),
+          itemName: e.name || '',
+          profitHK: profit,
+        });
+        totalTicketProfit += profit;
+      });
+    });
+    var totalExtra = extraProfit + totalTicketProfit;
+
     // 匯率
     var monthlyRate = Settings.getMonthlyRate(_currentMonth);
     var exchangeRate = monthlyRate.shareholderRate || 4.1;
@@ -3190,7 +3279,7 @@ var ShareholderPage = (function() {
     html += '<div class="sh-summary-divider"></div>';
     html += '<div class="sh-summary-cell"><label>總月退費(HK)</label><span>' + fmtHK(totalRebate) + '</span></div>';
     html += '<div class="sh-summary-divider"></div>';
-    html += '<div class="sh-summary-cell"><label>額外收入(HK)</label><span>' + fmtHK(extraProfit) + '</span></div>';
+    html += '<div class="sh-summary-cell"><label>額外收入(HK)</label><span>' + fmtHK(totalExtra) + '</span></div>';
     html += '<div class="sh-summary-divider"></div>';
     html += '<div class="sh-summary-cell"><label>股東數</label><span>' + shareholders.length + '</span></div>';
     html += '</div>';
@@ -3221,8 +3310,8 @@ var ShareholderPage = (function() {
       var sumHK = 0, sumTW = 0;
       shareholders.forEach(function(sh) {
         var profitData = calcShareholderProfit(sh, monthTxs, settings, _currentMonth);
-        var totalData = calcShareholderTotal(profitData, shareholders, totalWash, grandTotal, extraProfit);
-        var extraShare = extraProfit * (sh.shares / totalShares);
+        var totalData = calcShareholderTotal(profitData, shareholders, totalWash, grandTotal, totalExtra);
+        var extraShare = totalExtra * (sh.shares / totalShares);
         sumHK += totalData.totalPayableHK;
         sumTW += totalData.totalPayableTW;
 
@@ -3240,7 +3329,7 @@ var ShareholderPage = (function() {
 
       html += '<tr class="total-row">';
       html += '<td>合計</td><td>' + totalShares + '</td><td>' + fmtWan(totalWash) + '</td>';
-      html += '<td class="num">—</td><td class="num">—</td><td class="num">' + fmtHK(extraProfit) + '</td>';
+      html += '<td class="num">—</td><td class="num">—</td><td class="num">' + fmtHK(totalExtra) + '</td>';
       html += '<td class="num">' + fmtHK(sumHK) + '</td>';
       html += '<td class="num num-positive">' + fmtHK(sumTW) + '</td>';
       html += '</tr>';
@@ -3337,6 +3426,34 @@ var ShareholderPage = (function() {
     html += '</div>';
 
     html += '</div>'; // dual-col end
+
+    // ===== 5.5 門票利潤明細 =====
+    if (ticketProfits.length > 0) {
+      html += '<div class="sh-card">';
+      html += '<div class="sh-card-header"><h3 class="sh-section-title">門票利潤明細</h3></div>';
+      html += '<table class="sh-extra-table"><thead><tr>';
+      html += '<th>日期</th><th>代理</th><th>項目</th><th class="num">利潤(HK)</th>';
+      html += '</tr></thead><tbody>';
+      ticketProfits.forEach(function(tp) {
+        var dateParts = (tp.date || '').split('-');
+        var dateDisplay = dateParts.length === 3 ? (parseInt(dateParts[1]) + '/' + parseInt(dateParts[2])) : tp.date;
+        html += '<tr>';
+        html += '<td>' + dateDisplay + '</td>';
+        html += '<td>' + tp.agentName + '</td>';
+        html += '<td>' + tp.itemName + '</td>';
+        var cls = tp.profitHK >= 0 ? 'num num-positive' : 'num num-negative';
+        html += '<td class="' + cls + '">' + fmtHK(tp.profitHK) + '</td>';
+        html += '</tr>';
+      });
+      html += '<tr class="total-row">';
+      html += '<td colspan="3">合計</td>';
+      var totalCls = totalTicketProfit >= 0 ? 'num num-positive' : 'num num-negative';
+      html += '<td class="' + totalCls + '">' + fmtHK(totalTicketProfit) + '</td>';
+      html += '</tr>';
+      html += '</tbody></table>';
+      html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);margin-top:4px;">利潤 = 會員購入價 - 我們購買價，依持股比例分配至各股東</p>';
+      html += '</div>';
+    }
 
     // ===== 6. 股東 KPI 卡片 =====
     if (shareholders.length > 0) {
