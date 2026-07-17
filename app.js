@@ -673,11 +673,17 @@ function calcShareholderProfit(shareholder, allTxs, settings, month) {
   // 该股东线下所有交易
   var shTxs = (allTxs || []).filter(function(t) { return t.shareholderId === sId; });
 
-  // 按厅分组洗码
+  // 按厅分组洗码（優先從團 hallIds 讀取，交易記錄 vipHallId 為後備）
   var hallWash = {};
   shTxs.forEach(function(t) {
-    var hall = t.vipHallId || 'unknown';
-    hallWash[hall] = (hallWash[hall] || 0) + (t.washCode || 0);
+    var hallId = t.vipHallId || 'unknown';
+    if (t.tripId && typeof Trips !== 'undefined') {
+      var trip = Trips.getById(t.tripId);
+      if (trip && Array.isArray(trip.hallIds) && trip.hallIds.length > 0) {
+        hallId = trip.hallIds[0];
+      }
+    }
+    hallWash[hallId] = (hallWash[hallId] || 0) + (t.washCode || 0);
   });
 
   // 个人总洗码
@@ -3443,14 +3449,21 @@ var ShareholderPage = (function() {
       return t.date && t.date.substring(0, 7) === _currentMonth;
     });
 
-    // 計算各廳洗碼
+    // 計算各廳洗碼（優先從團 hallIds 讀取，交易記錄 vipHallId 為後備）
     var totalWash = 0;
     var hallWash = {};
     halls.forEach(function(h) { hallWash[h.id] = 0; });
     monthTxs.forEach(function(tx) {
       totalWash += (tx.washCode || 0);
-      if (hallWash[tx.vipHallId] !== undefined) {
-        hallWash[tx.vipHallId] += (tx.washCode || 0);
+      var hallId = tx.vipHallId;
+      if (tx.tripId) {
+        var trip = Trips.getById(tx.tripId);
+        if (trip && Array.isArray(trip.hallIds) && trip.hallIds.length > 0) {
+          hallId = trip.hallIds[0];
+        }
+      }
+      if (hallWash[hallId] !== undefined) {
+        hallWash[hallId] += (tx.washCode || 0);
       }
     });
 
