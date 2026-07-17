@@ -2520,6 +2520,12 @@ var MemberPage = (function() {
     html += '<div class="form-group"><label>客下(萬)</label><input type="number" step="0.001" id="tx-down" class="form-input" value="0" oninput="MemberPage.calcWash()"></div>';
     html += '<div class="form-group"><label>洗碼(萬)</label><input type="number" step="0.001" id="tx-wash" class="form-input"></div>';
     html += '</div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>倍率1</label><input type="number" step="0.01" id="tx-rate1" class="form-input" value="' + m.rate1 + '"></div>';
+    html += '<div class="form-group"><label>返水1</label><input type="number" step="0.001" id="tx-rebate1" class="form-input" value="' + m.rebate1 + '"></div>';
+    html += '<div class="form-group"><label>倍率2</label><input type="number" step="0.01" id="tx-rate2" class="form-input" value="' + m.rate2 + '"></div>';
+    html += '<div class="form-group"><label>返水2</label><input type="number" step="0.001" id="tx-rebate2" class="form-input" value="' + m.rebate2 + '"></div>';
+    html += '</div>';
     html += '<div id="tx-expenses"></div>';
     html += '<button class="btn-sm" onclick="MemberPage.addExpenseRow()">+ 開銷</button>';
     html += '<div style="text-align:right;margin-top:16px;">';
@@ -2615,7 +2621,10 @@ var MemberPage = (function() {
       washCode: parseFloat(document.getElementById('tx-wash').value) || 0,
       customerUp: parseFloat(document.getElementById('tx-up').value) || 0,
       customerDown: parseFloat(document.getElementById('tx-down').value) || 0,
-      rate1: m.rate1, rebate1: m.rebate1, rate2: m.rate2, rebate2: m.rebate2,
+      rate1: parseFloat(document.getElementById('tx-rate1').value) || 0,
+      rebate1: parseFloat(document.getElementById('tx-rebate1').value) || 0,
+      rate2: parseFloat(document.getElementById('tx-rate2').value) || 0,
+      rebate2: parseFloat(document.getElementById('tx-rebate2').value) || 0,
       expenses: _expenseRows.slice(),
     };
     var tx = MemberTxs.create(data);
@@ -2642,6 +2651,12 @@ var MemberPage = (function() {
     html += '<div class="form-group"><label>客下(萬)</label><input type="number" step="0.001" id="tx-down" class="form-input" value="' + fmtNum(tx.customerDown || 0) + '" oninput="MemberPage.calcWash()"></div>';
     html += '<div class="form-group"><label>洗碼(萬)</label><input type="number" step="0.001" id="tx-wash" class="form-input" value="' + fmtNum(tx.washCode || 0) + '"></div>';
     html += '</div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>倍率1</label><input type="number" step="0.01" id="tx-rate1" class="form-input" value="' + (tx.rate1 || 0) + '"></div>';
+    html += '<div class="form-group"><label>返水1</label><input type="number" step="0.001" id="tx-rebate1" class="form-input" value="' + (tx.rebate1 || 0) + '"></div>';
+    html += '<div class="form-group"><label>倍率2</label><input type="number" step="0.01" id="tx-rate2" class="form-input" value="' + (tx.rate2 || 0) + '"></div>';
+    html += '<div class="form-group"><label>返水2</label><input type="number" step="0.001" id="tx-rebate2" class="form-input" value="' + (tx.rebate2 || 0) + '"></div>';
+    html += '</div>';
     html += '<div id="tx-expenses"></div>';
     html += '<button class="btn-sm" onclick="MemberPage.addExpenseRow()">+ 開銷</button>';
     html += '<div style="text-align:right;margin-top:16px;">';
@@ -2657,6 +2672,10 @@ var MemberPage = (function() {
       washCode: parseFloat(document.getElementById('tx-wash').value) || 0,
       customerUp: parseFloat(document.getElementById('tx-up').value) || 0,
       customerDown: parseFloat(document.getElementById('tx-down').value) || 0,
+      rate1: parseFloat(document.getElementById('tx-rate1').value) || 0,
+      rebate1: parseFloat(document.getElementById('tx-rebate1').value) || 0,
+      rate2: parseFloat(document.getElementById('tx-rate2').value) || 0,
+      rebate2: parseFloat(document.getElementById('tx-rebate2').value) || 0,
       expenses: _expenseRows.slice(),
     };
     MemberTxs.update(txId, patch);
