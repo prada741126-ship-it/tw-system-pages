@@ -2630,7 +2630,7 @@ var MemberPage = (function() {
       html += '<button class="btn-sm" style="margin-top:8px;width:100%;" onclick="MemberPage.showAddAgent()">+ 新增代理</button>';
 
     } else {
-      // 全部代理 — 顯示各代理匯總
+      // 全部代理 — 顯示各代理匯總 + 整體統計
       var agents = Agents.getAll();
       html += '<div class="mb-ap-header"><span class="mb-ap-name">全部代理</span></div>';
 
@@ -2638,21 +2638,49 @@ var MemberPage = (function() {
         html += '<div class="empty-state">無代理資料</div>';
         html += '<button class="btn-sm" style="margin-top:8px;width:100%;" onclick="MemberPage.showAddAgent()">+ 新增代理</button>';
       } else {
-        // 各代理匯總表
-        html += '<table class="mb-ap-table"><thead><tr>';
-        html += '<th>代理</th><th class="num">洗碼</th><th class="num">交收</th><th class="num">房</th>';
-        html += '</tr></thead><tbody>';
-        var grandWash = 0, grandSettle = 0;
+        // 整體統計卡片
+        var totalWash = 0, totalWinLoss = 0, totalSettle = 0, totalRooms = 0, totalMembers = 0;
+        var allMemberIds = new Set();
         agents.forEach(function(ag) {
           var agTxs = tripMtxs.filter(function(t) { return t.agentId === ag.id; });
           var agWash = agTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
+          var agWinLoss = agTxs.reduce(function(s, t) { return s + (t.ntResult || 0) * 10000; }, 0);
+          var agSettle = agTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
+          var agRooms = allBookings.filter(function(b) { return b.agentId === ag.id; }).length;
+          agTxs.forEach(function(t) { allMemberIds.add(t.memberId); });
+          totalWash += agWash;
+          totalWinLoss += agWinLoss;
+          totalSettle += agSettle;
+          totalRooms += agRooms;
+        });
+        totalMembers = allMemberIds.size;
+
+        html += '<div class="mb-ap-stats">';
+        html += '<div class="mb-ap-stat"><label>總洗碼</label><span>' + fmtCardNum(totalWash) + ' 萬</span></div>';
+        html += '<div class="mb-ap-stat"><label>總輸贏</label><span class="' + (totalWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(totalWinLoss) + '</span></div>';
+        html += '<div class="mb-ap-stat"><label>總交收</label><span class="' + (totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(totalSettle) + '</span></div>';
+        html += '<div class="mb-ap-stat"><label>訂房數</label><span>' + totalRooms + ' 間</span></div>';
+        html += '<div class="mb-ap-stat"><label>會員數</label><span>' + totalMembers + '</span></div>';
+        html += '</div>';
+
+        // 各代理匯總表
+        html += '<table class="mb-ap-table"><thead><tr>';
+        html += '<th>代理</th><th class="num">洗碼</th><th class="num">輸贏</th><th class="num">交收</th><th class="num">房</th>';
+        html += '</tr></thead><tbody>';
+        var grandWash = 0, grandWinLoss = 0, grandSettle = 0;
+        agents.forEach(function(ag) {
+          var agTxs = tripMtxs.filter(function(t) { return t.agentId === ag.id; });
+          var agWash = agTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
+          var agWinLoss = agTxs.reduce(function(s, t) { return s + (t.ntResult || 0) * 10000; }, 0);
           var agSettle = agTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
           var agBookings = allBookings.filter(function(b) { return b.agentId === ag.id; });
           grandWash += agWash;
+          grandWinLoss += agWinLoss;
           grandSettle += agSettle;
           html += '<tr style="cursor:pointer;" onclick="MemberPage.selectAgent(\'' + ag.id + '\')">';
           html += '<td>' + ag.name + '</td>';
           html += '<td class="num">' + fmtCardNum(agWash) + '</td>';
+          html += '<td class="num ' + (agWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(agWinLoss) + '</td>';
           html += '<td class="num ' + (agSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(agSettle) + '</td>';
           html += '<td class="num">' + agBookings.length + '</td>';
           html += '</tr>';
@@ -2660,8 +2688,9 @@ var MemberPage = (function() {
         html += '<tr class="total-row">';
         html += '<td>合計</td>';
         html += '<td class="num">' + fmtCardNum(grandWash) + '</td>';
+        html += '<td class="num ' + (grandWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(grandWinLoss) + '</td>';
         html += '<td class="num ' + (grandSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(grandSettle) + '</td>';
-        html += '<td class="num">' + allBookings.length + '</td>';
+        html += '<td class="num">' + totalRooms + '</td>';
         html += '</tr>';
         html += '</tbody></table>';
 
