@@ -15,6 +15,7 @@
   --text-primary: #1a1a2e;
   --text-secondary: #6c757d;
   --text-muted: #adb5bd;
+  --text-inverse: #ffffff;
 
   /* === 主色 === */
   --accent: #2b6cb0;
@@ -364,43 +365,195 @@ a { color: var(--accent); text-decoration: none; }
   .ov-kpi-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
-/* pages/member.css — 會員帳務頁 12欄試算表 + 開銷子表格 + 退佣兩段 */
+/* pages/member.css — 會員帳務頁 卡片式呈現 */
 
-/* 會員試算表 */
-.mb-table { font-size: var(--font-size-sm); }
-.mb-table th { white-space: nowrap; min-width: 70px; }
-.mb-table td { white-space: nowrap; }
-.mb-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* 卡片網格 */
+.mb-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: var(--spacing-lg);
+  margin-top: var(--spacing-md);
+}
+
+/* 單張卡片 */
+.mb-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+/* 卡片標頭（藍色風格，類似試算表標題） */
+.mb-card-header {
+  background: var(--accent);
+  color: var(--text-inverse);
+  padding: var(--spacing-md) var(--spacing-lg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.mb-card-hall {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+.mb-card-member {
+  font-size: var(--font-size-base);
+  opacity: 0.95;
+}
+
+/* 卡片內區塊 */
+.mb-card-section {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--border);
+}
+.mb-card-section:last-of-type {
+  border-bottom: none;
+}
+.mb-card-section-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* 卡片行（label + value） */
+.mb-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: var(--font-size-base);
+}
+.mb-card-label {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+.mb-card-val {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 
 /* 負數紅色 / 正數綠色 */
-.mb-table .num-negative { color: var(--danger); font-weight: 600; }
-.mb-table .num-positive { color: var(--success); font-weight: 600; }
+.num-negative { color: var(--danger); font-weight: 600; }
+.num-positive { color: var(--success); font-weight: 600; }
+
+/* 開銷明細小表格 */
+.mb-card-expense-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-sm);
+}
+.mb-card-expense-head,
+.mb-card-expense-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: var(--spacing-xs);
+  padding: 2px 0;
+}
+.mb-card-expense-head {
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+.mb-card-expense-row span {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.mb-card-expense-row span:first-child {
+  text-align: left;
+}
+
+/* 卡片底部 */
+.mb-card-footer {
+  padding: var(--spacing-md);
+  background: var(--bg-primary);
+  border-top: 2px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+.mb-card-total {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+}
+.mb-card-total-val {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.mb-card-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
 
 /* 匯總列 */
-.mb-summary { display: flex; flex-wrap: wrap; gap: var(--spacing-lg); padding: var(--spacing-md) 0; font-weight: 600; border-top: 2px solid var(--border); margin-top: var(--spacing-sm); }
-.mb-summary-item { display: flex; gap: var(--spacing-xs); align-items: baseline; }
-.mb-summary-item label { font-size: var(--font-size-sm); color: var(--text-secondary); font-weight: 400; }
+.mb-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-md) 0;
+  font-weight: 600;
+  border-top: 2px solid var(--border);
+  margin-top: var(--spacing-sm);
+}
+.mb-summary-item {
+  display: flex;
+  gap: var(--spacing-xs);
+  align-items: baseline;
+}
+.mb-summary-item label {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  font-weight: 400;
+}
 
 /* 開銷子表格（Modal 內嵌） */
 .mb-expense-list { margin: var(--spacing-sm) 0; }
-.mb-expense-row { display: flex; gap: var(--spacing-sm); align-items: center; margin-bottom: var(--spacing-xs); }
+.mb-expense-row {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+  margin-bottom: var(--spacing-xs);
+}
 .mb-expense-row .form-input { flex: 1; }
 .mb-expense-row .form-input:first-child { flex: 2; }
-
-/* 退佣兩段區塊 */
-.mb-commission-section { display: flex; gap: var(--spacing-md); margin: var(--spacing-sm) 0; }
-.mb-commission-block { flex: 1; padding: var(--spacing-sm); background: var(--bg-primary); border-radius: var(--radius); }
-.mb-commission-block label { font-size: var(--font-size-sm); color: var(--text-secondary); display: block; }
-.mb-commission-block span { font-size: var(--font-size-lg); font-weight: 600; }
 
 /* Modal 表單寬度 */
 .mb-tx-form { min-width: 400px; }
 
 /* 響應式 */
 @media (max-width: 768px) {
-  .mb-commission-section { flex-direction: column; }
+  .mb-card-grid {
+    grid-template-columns: 1fr;
+  }
+  .mb-card-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
   .mb-tx-form { min-width: auto; }
   .mb-summary { flex-direction: column; gap: var(--spacing-xs); }
+}
+
+@media (max-width: 480px) {
+  .mb-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .mb-card-expense-head,
+  .mb-card-expense-row {
+    grid-template-columns: 1.5fr 1fr 0.8fr 1fr;
+  }
 }
 
 /* pages/room.css — 房務頁 訂房表 + 代理級折抵判定表 + 三級聯動 */
@@ -606,6 +759,6 @@ a { color: var(--accent); text-decoration: none; }
 <!-- Toast -->
 <div id="toast-container" class="toast-container"></div>
 
-<script src="app.js?v=1784285450822"></script>
+<script src="app.js?v=1784285836651"></script>
 </body>
 </html>

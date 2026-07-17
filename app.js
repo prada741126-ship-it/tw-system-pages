@@ -2371,45 +2371,89 @@ var MemberPage = (function() {
     if (_selectedTrip) {
       var trip = Trips.getById(_selectedTrip);
       var mtxs = MemberTxs.getByTrip(_selectedTrip);
-      html += '<div class="table-wrapper">';
-      html += '<table class="data-table"><thead><tr>';
-      html += '<th>會員</th><th>廳</th><th>出碼</th><th>回碼</th><th>上下分</th>';
-      html += '<th>NT輸贏</th><th>退傭1</th><th>退傭2</th><th>小計</th>';
-      html += '<th>開銷NT</th><th>總交收</th><th>交收金額</th><th>驗證</th><th>操作</th>';
-      html += '</tr></thead><tbody>';
+
       if (mtxs.length === 0) {
-        html += '<tr><td colspan="14" class="empty-state">此團無帳務記錄</td></tr>';
+        html += '<div class="empty-state">此團無帳務記錄</div>';
       } else {
+        html += '<div class="mb-card-grid">';
         mtxs.forEach(function(tx) {
           var m = Members.getById(tx.memberId);
-          html += '<tr>';
-          html += '<td>' + (m ? m.name : tx.memberId) + '</td>';
-          html += '<td>' + (tx.vipHallId || '') + '</td>';
-          html += '<td>' + (tx.outCode || 0) + '</td>';
-          html += '<td>' + (tx.backCode || 0) + '</td>';
-          html += '<td>' + (tx.upDown || 0).toFixed(3) + '</td>';
-          html += '<td>' + (tx.ntResult || 0).toFixed(3) + '</td>';
-          html += '<td>' + (tx.commission1 || 0).toFixed(4) + '</td>';
-          html += '<td>' + (tx.commission2 || 0).toFixed(4) + '</td>';
-          html += '<td>' + (tx.subtotal || 0).toFixed(4) + '</td>';
-          html += '<td>' + Math.round(tx.expensesNT || 0) + '</td>';
-          html += '<td>' + Math.round(tx.totalSettlement || 0) + '</td>';
-          html += '<td class="num">' + Math.round(tx.settlementAmount || 0).toLocaleString() + '</td>';
-          html += '<td>' + (tx.verifyStatus === 'verified' ? '✅' : '⚠️') + '</td>';
-          html += '<td><button class="btn-sm" onclick="MemberPage.editTx(\'' + tx.id + '\')">編輯</button> ';
-          html += '<button class="btn-sm btn-danger" onclick="MemberPage.delTx(\'' + tx.id + '\')">刪</button></td>';
-          html += '</tr>';
-        });
-      }
-      html += '</tbody></table>';
-      html += '</div>';
+          var hall = VIP_HALLS.find(function(h) { return h.id === tx.vipHallId; });
+          var isNeg = (tx.upDown || 0) < 0;
+          var isWin = (tx.settlementAmount || 0) > 0;
 
-      // 合计行
+          html += '<div class="mb-card">';
+
+          // 卡片標頭：廳名 + 會員編號 + 客稱
+          html += '<div class="mb-card-header">';
+          html += '<div class="mb-card-hall">' + (hall ? hall.name : (tx.vipHallId || '')) + '</div>';
+          html += '<div class="mb-card-member">' + (m ? m.id : tx.memberId) + ' ' + (m ? m.name : '') + '</div>';
+          html += '</div>';
+
+          // 第一區：開工&關帳、出碼、回碼、上下分
+          html += '<div class="mb-card-section">';
+          html += '<div class="mb-card-row"><span class="mb-card-label">開工&關帳</span><span class="mb-card-val">' + (tx.date || '') + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">出碼</span><span class="mb-card-val">' + fmtCardNum(tx.outCode || 0) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">回碼</span><span class="mb-card-val">' + fmtCardNum(tx.backCode || 0) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">上下分</span><span class="mb-card-val ' + (isNeg ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(tx.upDown || 0) + '</span></div>';
+          html += '</div>';
+
+          // 第二區：洗碼、倍率、返水、退傭、NT輸贏、小計
+          html += '<div class="mb-card-section">';
+          html += '<div class="mb-card-row"><span class="mb-card-label">洗碼數</span><span class="mb-card-val">' + fmtCardNum(tx.washCode || 0) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">倍率</span><span class="mb-card-val">' + (tx.rate1 || 0) + ' / ' + (tx.rate2 || 0) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">返水</span><span class="mb-card-val">' + (tx.rebate1 || 0) + ' / ' + (tx.rebate2 || 0) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">退傭1</span><span class="mb-card-val">' + fmtCardNum(tx.commission1 || 0) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">退傭2</span><span class="mb-card-val">' + fmtCardNum(tx.commission2 || 0) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">NT輸贏</span><span class="mb-card-val ' + ((tx.ntResult || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(tx.ntResult || 0) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">小計</span><span class="mb-card-val ' + ((tx.subtotal || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(tx.subtotal || 0) + '</span></div>';
+          html += '</div>';
+
+          // 第三區：開銷明細
+          var expenses = tx.expenses || [];
+          html += '<div class="mb-card-section">';
+          html += '<div class="mb-card-section-title">開銷明細</div>';
+          if (expenses.length === 0) {
+            html += '<div class="mb-card-row"><span class="mb-card-label">—</span></div>';
+          } else {
+            html += '<div class="mb-card-expense-table">';
+            html += '<div class="mb-card-expense-head"><span>項目</span><span>HK</span><span>匯率</span><span>NT</span></div>';
+            expenses.forEach(function(e) {
+              var nt = (e.amountHK || 0) * (e.exchangeRate || 0);
+              html += '<div class="mb-card-expense-row">';
+              html += '<span>' + (e.name || '') + '</span>';
+              html += '<span>' + fmtCardNum(e.amountHK || 0) + '</span>';
+              html += '<span>' + (e.exchangeRate || 0) + '</span>';
+              html += '<span>' + fmtCardNum(nt) + '</span>';
+              html += '</div>';
+            });
+            html += '</div>';
+          }
+          html += '</div>';
+
+          // 底部：總交收 + 操作
+          html += '<div class="mb-card-footer">';
+          html += '<div class="mb-card-total">';
+          html += '<span class="mb-card-label">總交收金額NT</span>';
+          html += '<span class="mb-card-total-val ' + (isWin ? 'num-positive' : 'num-negative') + '">' + Math.round(tx.settlementAmount || 0).toLocaleString() + '</span>';
+          html += '</div>';
+          html += '<div class="mb-card-actions">';
+          html += '<button class="btn-sm" onclick="MemberPage.editTx(\'' + tx.id + '\')">編輯</button>';
+          html += '<button class="btn-sm btn-danger" onclick="MemberPage.delTx(\'' + tx.id + '\')">刪</button>';
+          html += '</div>';
+          html += '</div>';
+
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      // 合計行
       if (mtxs.length > 0) {
         var totalSettle = mtxs.reduce(function(s, t) { return s + (t.settlementAmount || 0); }, 0);
         var totalWash = mtxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
         html += '<div class="summary-row">';
-        html += '<span>總洗碼: ' + totalWash.toFixed(2) + ' 萬</span>';
+        html += '<span>總洗碼: ' + fmtCardNum(totalWash) + ' 萬</span>';
         html += '<span>合計交收: NT$ ' + Math.round(totalSettle).toLocaleString() + '</span>';
         html += '</div>';
       }
@@ -2465,6 +2509,11 @@ var MemberPage = (function() {
   function fmtNum(n) {
     var v = Math.round(n * 1000) / 1000;
     if (Math.abs(v - Math.round(v)) < 1e-6) return String(Math.round(v));
+    return v.toFixed(3).replace(/\.?0+$/, '');
+  }
+  function fmtCardNum(n) {
+    var v = Math.round(n * 1000) / 1000;
+    if (Math.abs(v - Math.round(v)) < 1e-6) return Math.round(v).toLocaleString();
     return v.toFixed(3).replace(/\.?0+$/, '');
   }
 
