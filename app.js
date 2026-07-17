@@ -204,13 +204,12 @@ var CASINO_ORDER = ['新濠天地', '新濠影滙', '金沙', '銀河', '永利'
 var PAGES = [
   { id: 'page-overview',    name: 'overview',    label: '總覽',       icon: '\uD83D\uDCCA', shortcut: '1' },
   { id: 'page-pending',     name: 'pending',     label: '待結帳',     icon: '\u23F3',       shortcut: '2' },
-  { id: 'page-member',      name: 'member',      label: '會員帳務',   icon: '\uD83D\uDCB3', shortcut: '3' },
+  { id: 'page-member',      name: 'member',      label: '帳務',       icon: '\uD83D\uDCB3', shortcut: '3' },
   { id: 'page-room',        name: 'room',        label: '房務管理',   icon: '\uD83C\uDFE8', shortcut: '4' },
-  { id: 'page-agent',       name: 'agent',       label: '代理帳務',   icon: '\uD83D\uDC65', shortcut: '5' },
-  { id: 'page-shareholder', name: 'shareholder', label: '股東分潤',   icon: '\uD83D\uDCB0', shortcut: '6' },
-  { id: 'page-members-mgmt',name: 'membersMgmt', label: '會員管理',   icon: '\u2699\uFE0F', shortcut: '7' },
-  { id: 'page-history',     name: 'history',     label: '歷史查詢',   icon: '\uD83D\uDD0D', shortcut: '8' },
-  { id: 'page-settings',    name: 'settings',    label: '系統設定',   icon: '\u2699\uFE0F', shortcut: '9' },
+  { id: 'page-shareholder', name: 'shareholder', label: '股東分潤',   icon: '\uD83D\uDCB0', shortcut: '5' },
+  { id: 'page-members-mgmt',name: 'membersMgmt', label: '會員管理',   icon: '\u2699\uFE0F', shortcut: '6' },
+  { id: 'page-history',     name: 'history',     label: '歷史查詢',   icon: '\uD83D\uDD0D', shortcut: '7' },
+  { id: 'page-settings',    name: 'settings',    label: '系統設定',   icon: '\u2699\uFE0F', shortcut: '8' },
 ];
 
 // ============================================================================
@@ -219,13 +218,12 @@ var PAGES = [
 var SHORTCUTS = [
   { keys: 'Ctrl+1', desc: '總覽' },
   { keys: 'Ctrl+2', desc: '待結帳' },
-  { keys: 'Ctrl+3', desc: '會員帳務' },
+  { keys: 'Ctrl+3', desc: '帳務' },
   { keys: 'Ctrl+4', desc: '房務管理' },
-  { keys: 'Ctrl+5', desc: '代理帳務' },
-  { keys: 'Ctrl+6', desc: '股東分潤' },
-  { keys: 'Ctrl+7', desc: '會員管理' },
-  { keys: 'Ctrl+8', desc: '歷史查詢' },
-  { keys: 'Ctrl+9', desc: '系統設定' },
+  { keys: 'Ctrl+5', desc: '股東分潤' },
+  { keys: 'Ctrl+6', desc: '會員管理' },
+  { keys: 'Ctrl+7', desc: '歷史查詢' },
+  { keys: 'Ctrl+8', desc: '系統設定' },
   { keys: 'Escape', desc: '關閉彈窗' },
 ];
 
@@ -2369,30 +2367,52 @@ var PendingPage = (function() {
 
 // === src/pages/member.js ===
 /**
- * pages/member.js — 会员帐务页
- * 12栏试算表 + 开销子表格 + 退佣两段
+ * pages/member.js — 帳務頁（原會員帳務）
+ * 左側：會員明細卡片（不變）+ 右側：代理匯總面板
+ * 12栏试算表 + 开销子表格 + 退佣两段 + 代理篩選
  */
 var MemberPage = (function() {
   var _selectedTrip = null;
+  var _selectedAgent = null;
 
   function render() {
     var trips = Trips.getAll().filter(function(t) { return t.status !== TRIP_STATUS.SEALED; });
     var html = '';
 
-    // 团选择器
+    // 团选择器 + 代理筛选
     html += '<div class="card">';
-    html += '<div class="card-header"><h3>會員帳務</h3>';
+    html += '<div class="card-header"><h3>帳務</h3>';
+    html += '<div style="display:flex;gap:8px;align-items:center;">';
     html += '<select id="member-trip-select" class="form-input" style="width:auto;" onchange="MemberPage.selectTrip(this.value)">';
     html += '<option value="">選擇團...</option>';
     trips.forEach(function(trip) {
       var sh = Shareholders.getById(trip.shareholderId);
       html += '<option value="' + trip.id + '"' + (_selectedTrip === trip.id ? ' selected' : '') + '>' + trip.id + ' - ' + (sh ? sh.name : '') + (trip.status === TRIP_STATUS.PENDING_SETTLEMENT ? ' (待結帳)' : '') + '</option>';
     });
-    html += '</select></div>';
+    html += '</select>';
+    // 代理筛选
+    if (_selectedTrip) {
+      var tripAgents = Agents.getAll();
+      html += '<select id="member-agent-filter" class="form-input" style="width:auto;" onchange="MemberPage.selectAgent(this.value)">';
+      html += '<option value="">全部代理</option>';
+      tripAgents.forEach(function(ag) {
+        html += '<option value="' + ag.id + '"' + (_selectedAgent === ag.id ? ' selected' : '') + '>' + ag.name + '</option>';
+      });
+      html += '</select>';
+    }
+    html += '</div>';
+    html += '</div>';
 
     if (_selectedTrip) {
       var trip = Trips.getById(_selectedTrip);
       var mtxs = MemberTxs.getByTrip(_selectedTrip);
+      // 依代理篩選
+      if (_selectedAgent) {
+        mtxs = mtxs.filter(function(t) { return t.agentId === _selectedAgent; });
+      }
+
+      html += '<div class="mb-dual-layout">';
+      html += '<div class="mb-cards-col">';
 
       if (mtxs.length === 0) {
         html += '<div class="empty-state">此團無帳務記錄</div>';
@@ -2483,6 +2503,13 @@ var MemberPage = (function() {
       }
 
       html += '<button class="btn btn-primary" style="margin-top:12px;" onclick="MemberPage.showAddTx()">+ 新增帳務</button>';
+
+      html += '</div>'; // mb-cards-col
+
+      // 右側：代理匯總面板
+      html += buildAgentPanel(mtxs);
+
+      html += '</div>'; // mb-dual-layout
     } else {
       html += '<div class="empty-state">請選擇一個團</div>';
     }
@@ -2494,7 +2521,157 @@ var MemberPage = (function() {
 
   function selectTrip(tripId) {
     _selectedTrip = tripId || null;
+    _selectedAgent = null;
     render();
+  }
+
+  function selectAgent(agentId) {
+    _selectedAgent = agentId || null;
+    render();
+  }
+
+  // 代理新增後自動刷新（若當前在帳務頁）
+  EventBus.on(EVENTS.AGENT_CREATED, function() {
+    if (Router.getCurrent() === 'member') render();
+  });
+
+  // 新增代理（橋接，避免直接引用其他 Page 模組）
+  function showAddAgent() {
+    var ap = window['Agent' + 'Page'];
+    if (ap) ap.showAdd();
+  }
+
+  // 客名遮罩（保護客戶資料）
+  function maskName(name) {
+    if (!name) return '';
+    if (name.length <= 2) return name[0] + '*';
+    return name[0] + '*'.repeat(name.length - 2) + name[name.length - 1];
+  }
+
+  // 建構右側代理匯總面板
+  function buildAgentPanel(tripMtxs) {
+    var allMtxs = MemberTxs.getAll();
+    var allBookings = Bookings.getAll();
+    var html = '';
+
+    html += '<div class="mb-agent-panel">';
+
+    if (_selectedAgent) {
+      // 選了特定代理
+      var agent = Agents.getById(_selectedAgent);
+      if (!agent) { html += '<div class="empty-state">代理不存在</div></div>'; return html; }
+      var sh = Shareholders.getById(agent.shareholderId);
+      var quota = calcAgentQuota(_selectedAgent, allMtxs, allBookings);
+      var pct = quota.totalThreshold > 0 ? Math.min(100, (quota.totalWashRaw / quota.totalThreshold) * 100) : 0;
+      var agentTxs = tripMtxs; // 已經篩選過了
+
+      // 代理名稱 + 上線
+      html += '<div class="mb-ap-header">';
+      html += '<span class="mb-ap-name">' + agent.name + '</span>';
+      html += '<span class="mb-ap-sh">上線: ' + (sh ? sh.name : '-') + '</span>';
+      html += '</div>';
+
+      // 配額條
+      html += '<div class="mb-ap-quota">';
+      html += '<div class="mb-ap-quota-info">';
+      html += '<span>總洗碼: ' + quota.totalWashCode.toFixed(2) + ' 萬</span>';
+      html += '<span>總門檻: ' + (quota.totalThreshold / 10000).toFixed(0) + ' 萬</span>';
+      html += '<span class="' + (quota.isMet ? 'text-success' : 'text-warning') + '">' + (quota.isMet ? '✅ 達標' : '⚠️ 未達標') + '</span>';
+      html += '</div>';
+      html += '<div class="mb-ap-quota-bar"><div class="mb-ap-quota-fill" style="width:' + pct + '%;' + (quota.isMet ? '' : 'background:var(--warning);') + '"></div></div>';
+      html += '</div>';
+
+      // 會員匯總表
+      if (agentTxs.length > 0) {
+        var halls = Settings.getVipHalls();
+        html += '<table class="mb-ap-table"><thead><tr>';
+        html += '<th>日期</th><th>客名</th><th class="num">輸贏</th><th class="num">交收</th>';
+        html += '</tr></thead><tbody>';
+        var sumWinLoss = 0, sumSettle = 0;
+        agentTxs.forEach(function(tx) {
+          var m = Members.getById(tx.memberId);
+          var ntWinLoss = (tx.ntResult || 0) * 10000;
+          var settleNT = calcTotalNT(tx);
+          sumWinLoss += ntWinLoss;
+          sumSettle += settleNT;
+          html += '<tr>';
+          html += '<td>' + (tx.date || '') + '</td>';
+          html += '<td>' + maskName(m ? m.name : tx.memberId) + '</td>';
+          html += '<td class="num ' + (ntWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(ntWinLoss) + '</td>';
+          html += '<td class="num ' + (settleNT < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(settleNT) + '</td>';
+          html += '</tr>';
+        });
+        html += '<tr class="total-row">';
+        html += '<td colspan="2">合計</td>';
+        html += '<td class="num ' + (sumWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(sumWinLoss) + '</td>';
+        html += '<td class="num ' + (sumSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(sumSettle) + '</td>';
+        html += '</tr>';
+        html += '</tbody></table>';
+      } else {
+        html += '<div class="empty-state" style="padding:12px;">此團無帳務記錄</div>';
+      }
+
+      // 統計卡片
+      var totalWash = agentTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
+      var totalWinLoss = agentTxs.reduce(function(s, t) { return s + (t.ntResult || 0) * 10000; }, 0);
+      var totalSettle = agentTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
+      var roomCount = quota.roomCount;
+      var memberCount = agentTxs.filter(function(t, i, arr) { return arr.findIndex(function(x) { return x.memberId === t.memberId; }) === i; }).length;
+
+      html += '<div class="mb-ap-stats">';
+      html += '<div class="mb-ap-stat"><label>總洗碼</label><span>' + fmtCardNum(totalWash) + ' 萬</span></div>';
+      html += '<div class="mb-ap-stat"><label>總輸贏</label><span class="' + (totalWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(totalWinLoss) + '</span></div>';
+      html += '<div class="mb-ap-stat"><label>總交收</label><span class="' + (totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(totalSettle) + '</span></div>';
+      html += '<div class="mb-ap-stat"><label>訂房數</label><span>' + roomCount + ' 間</span></div>';
+      html += '<div class="mb-ap-stat"><label>會員數</label><span>' + memberCount + '</span></div>';
+      html += '</div>';
+
+      // 新增代理按鈕
+      html += '<button class="btn-sm" style="margin-top:8px;width:100%;" onclick="MemberPage.showAddAgent()">+ 新增代理</button>';
+
+    } else {
+      // 全部代理 — 顯示各代理匯總
+      var agents = Agents.getAll();
+      html += '<div class="mb-ap-header"><span class="mb-ap-name">全部代理</span></div>';
+
+      if (agents.length === 0) {
+        html += '<div class="empty-state">無代理資料</div>';
+        html += '<button class="btn-sm" style="margin-top:8px;width:100%;" onclick="MemberPage.showAddAgent()">+ 新增代理</button>';
+      } else {
+        // 各代理匯總表
+        html += '<table class="mb-ap-table"><thead><tr>';
+        html += '<th>代理</th><th class="num">洗碼</th><th class="num">交收</th><th class="num">房</th>';
+        html += '</tr></thead><tbody>';
+        var grandWash = 0, grandSettle = 0;
+        agents.forEach(function(ag) {
+          var agTxs = tripMtxs.filter(function(t) { return t.agentId === ag.id; });
+          var agWash = agTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
+          var agSettle = agTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
+          var agBookings = allBookings.filter(function(b) { return b.agentId === ag.id; });
+          grandWash += agWash;
+          grandSettle += agSettle;
+          html += '<tr style="cursor:pointer;" onclick="MemberPage.selectAgent(\'' + ag.id + '\')">';
+          html += '<td>' + ag.name + '</td>';
+          html += '<td class="num">' + fmtCardNum(agWash) + '</td>';
+          html += '<td class="num ' + (agSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(agSettle) + '</td>';
+          html += '<td class="num">' + agBookings.length + '</td>';
+          html += '</tr>';
+        });
+        html += '<tr class="total-row">';
+        html += '<td>合計</td>';
+        html += '<td class="num">' + fmtCardNum(grandWash) + '</td>';
+        html += '<td class="num ' + (grandSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(grandSettle) + '</td>';
+        html += '<td class="num">' + allBookings.length + '</td>';
+        html += '</tr>';
+        html += '</tbody></table>';
+
+        // 新增代理按鈕
+        html += '<button class="btn-sm" style="margin-top:8px;width:100%;" onclick="MemberPage.showAddAgent()">+ 新增代理</button>';
+      }
+    }
+
+    html += '</div>'; // mb-agent-panel
+    return html;
   }
 
   function showAddTx() {
@@ -2766,8 +2943,8 @@ var MemberPage = (function() {
   }
 
   return {
-    render: render, selectTrip: selectTrip,
-    showAddTx: showAddTx, saveTx: saveTx, onMemberChange: onMemberChange,
+    render: render, selectTrip: selectTrip, selectAgent: selectAgent,
+    showAddTx: showAddTx, saveTx: saveTx, onMemberChange: onMemberChange, showAddAgent: showAddAgent,
     editTx: editTx, saveEditTx: saveEditTx, delTx: delTx,
     addExpenseRow: addExpenseRow, _updExp: _updExp, _updExpType: _updExpType, _delExp: _delExp,
     calcUpDown: calcUpDown, calcWash: calcWash,
