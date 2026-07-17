@@ -2665,24 +2665,30 @@ var MemberPage = (function() {
 
         // 各代理匯總表
         html += '<table class="mb-ap-table"><thead><tr>';
-        html += '<th>代理</th><th class="num">洗碼</th><th class="num">輸贏</th><th class="num">交收</th><th class="num">房</th>';
+        html += '<th>代理</th><th class="num">洗碼</th><th class="num">輸贏</th><th class="num">交收</th><th class="num">房</th><th class="num">會</th>';
         html += '</tr></thead><tbody>';
-        var grandWash = 0, grandWinLoss = 0, grandSettle = 0;
+        var grandWash = 0, grandWinLoss = 0, grandSettle = 0, grandRooms = 0, grandMembers = 0;
         agents.forEach(function(ag) {
           var agTxs = tripMtxs.filter(function(t) { return t.agentId === ag.id; });
           var agWash = agTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
           var agWinLoss = agTxs.reduce(function(s, t) { return s + (t.ntResult || 0) * 10000; }, 0);
           var agSettle = agTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
           var agBookings = allBookings.filter(function(b) { return b.agentId === ag.id; });
+          var agMemberIds = new Set();
+          agTxs.forEach(function(t) { agMemberIds.add(t.memberId); });
+          var agMemberCount = agMemberIds.size;
           grandWash += agWash;
           grandWinLoss += agWinLoss;
           grandSettle += agSettle;
+          grandRooms += agBookings.length;
+          grandMembers += agMemberCount;
           html += '<tr style="cursor:pointer;" onclick="MemberPage.selectAgent(\'' + ag.id + '\')">';
           html += '<td>' + ag.name + '</td>';
           html += '<td class="num">' + fmtCardNum(agWash) + '</td>';
           html += '<td class="num ' + (agWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(agWinLoss) + '</td>';
           html += '<td class="num ' + (agSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(agSettle) + '</td>';
           html += '<td class="num">' + agBookings.length + '</td>';
+          html += '<td class="num">' + agMemberCount + '</td>';
           html += '</tr>';
         });
         html += '<tr class="total-row">';
@@ -2690,7 +2696,9 @@ var MemberPage = (function() {
         html += '<td class="num">' + fmtCardNum(grandWash) + '</td>';
         html += '<td class="num ' + (grandWinLoss < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(grandWinLoss) + '</td>';
         html += '<td class="num ' + (grandSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(grandSettle) + '</td>';
-        html += '<td class="num">' + totalRooms + '</td>';
+        html += '<td class="num">' + grandRooms + '</td>';
+        html += '<td class="num">' + grandMembers + '</td>';
+        html += '</tr>';
         html += '</tr>';
         html += '</tbody></table>';
 

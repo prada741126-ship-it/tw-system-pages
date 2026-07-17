@@ -562,7 +562,7 @@ a { color: var(--accent); text-decoration: none; }
   min-width: 0;
 }
 .mb-agent-panel {
-  flex: 0 0 400px;
+  flex: 0 0 320px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -629,7 +629,7 @@ a { color: var(--accent); text-decoration: none; }
 /* 代理面板 — 匯總表 */
 .mb-ap-table {
   width: 100%;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   border-collapse: separate;
   border-spacing: 0;
   margin: var(--spacing-sm) 0;
@@ -641,19 +641,21 @@ a { color: var(--accent); text-decoration: none; }
   background: var(--accent);
 }
 .mb-ap-table th {
-  padding: 8px 10px;
+  padding: 10px 8px;
   text-align: left;
   font-weight: 700;
   color: var(--bg-primary);
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 .mb-ap-table th.num {
   text-align: right;
 }
 .mb-ap-table td {
-  padding: 6px 10px;
+  padding: 8px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-primary);
+  white-space: nowrap;
 }
 .mb-ap-table tbody tr:hover td {
   background: var(--bg-hover);
@@ -668,7 +670,7 @@ a { color: var(--accent); text-decoration: none; }
   background: var(--bg-secondary);
   border-top: 2px solid var(--accent);
   border-bottom: none;
-  padding-top: 8px;
+  padding-top: 10px;
 }
 .mb-ap-table .num-negative { color: var(--danger); font-weight: 600; }
 .mb-ap-table .num-positive { color: var(--success); font-weight: 600; }
@@ -676,7 +678,7 @@ a { color: var(--accent); text-decoration: none; }
 /* 代理面板 — 統計卡片 */
 .mb-ap-stats {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: var(--spacing-sm);
   margin: var(--spacing-md) 0;
 }
@@ -710,6 +712,12 @@ a { color: var(--accent); text-decoration: none; }
 }
 .mb-ap-stat .num-negative { color: var(--danger); }
 .mb-ap-stat .num-positive { color: var(--success); }
+.mb-ap-stat:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  justify-content: center;
+  gap: var(--spacing-md);
+}
 
 /* 響應式 */
 @media (max-width: 768px) {
@@ -1209,6 +1217,6 @@ a { color: var(--accent); text-decoration: none; }
 <!-- Toast -->
 <div id="toast-container" class="toast-container"></div>
 
-<script src="app.js?v=1784318818303"></script>
+<script src="app.js?v=1784319120032"></script>
 </body>
 </html>
