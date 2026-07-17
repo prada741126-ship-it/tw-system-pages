@@ -2218,7 +2218,17 @@ var OverviewPage = (function() {
     render();
   }
 
-  return { render: render, showCreateTrip: showCreateTrip, createTrip: createTrip, showEditTrip: showEditTrip, saveEditTrip: saveEditTrip, deleteTrip: deleteTrip };
+  function addMemberToTripEdit(tripId) {
+    var select = document.getElementById('trip-add-member-edit');
+    var val = select.value;
+    if (!val) { Toast.error('請選擇會員'); return; }
+    var memberSelect = document.getElementById('trip-members-edit');
+    var option = memberSelect.querySelector('option[value="' + val + '"]');
+    if (option) option.selected = true;
+    Toast.success('已加入 ' + val);
+  }
+
+  return { render: render, showCreateTrip: showCreateTrip, createTrip: createTrip, showEditTrip: showEditTrip, saveEditTrip: saveEditTrip, deleteTrip: deleteTrip, addMemberToTripEdit: addMemberToTripEdit };
 
   function showEditTrip(tripId) {
     var trip = Trips.getById(tripId);
@@ -2240,15 +2250,20 @@ var OverviewPage = (function() {
       html += '<option value="' + h.id + '"' + sel + '>' + h.name + '</option>';
     });
     html += '</select></div>';
-    html += '<div class="form-group"><label>成員</label>';
-    html += '<select id="trip-members-edit" class="form-input" multiple size="6">';
+    html += '<div class="form-group" style="margin-top:4px;"><label>新增成员</label>';
+    html += '<div style="display:flex;gap:8px;">';
+    html += '<select id="trip-add-member-edit" class="form-input" style="flex:1;">';
+    html += '<option value="">選擇會員...</option>';
     members.forEach(function(m) {
       var memberIds = trip.memberIds || [];
       if (!Array.isArray(memberIds)) memberIds = Object.values(memberIds);
-      var sel = memberIds.indexOf(m.id) >= 0 ? ' selected' : '';
-      html += '<option value="' + m.id + '"' + sel + '>' + m.id + ' ' + m.name + '</option>';
+      if (memberIds.indexOf(m.id) < 0) {
+        html += '<option value="' + m.id + '">' + m.id + ' ' + m.name + '</option>';
+      }
     });
-    html += '</select></div>';
+    html += '</select>';
+    html += '<button class="btn btn-primary" onclick="OverviewPage.addMemberToTripEdit(\'' + tripId + '\')">加入</button>';
+    html += '</div></div>';
     html += '<div class="form-group"><label>備註</label>';
     html += '<input type="text" id="trip-notes-edit" class="form-input" value="' + (trip.notes || '') + '"></div>';
     html += '<div style="text-align:right;margin-top:16px;">';
