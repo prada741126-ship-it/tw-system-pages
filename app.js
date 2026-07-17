@@ -148,10 +148,11 @@ var EVENTS = {
 // 贵宾厅设定
 // ============================================================================
 var VIP_HALLS = [
-  { id: 'lyi', name: '勵盈會', rate: 0.0018, hasMonthlyRebate: true,  rebateRate: 0.0005 },
-  { id: 'yub', name: '御匾會', rate: 0.0015, hasMonthlyRebate: true,  rebateRate: 0.0005 },
-  { id: 'jm1', name: '金門1',  rate: 0.0023, hasMonthlyRebate: false, rebateRate: 0 },
-  { id: 'jm8', name: '金門8',  rate: 0.0018, hasMonthlyRebate: false, rebateRate: 0 },
+  // rate = 退傭 = cashRate + rebateRate
+  { id: 'lyi', name: '勵盈會', rate: 0.0123, cashRate: 0.0118, hasMonthlyRebate: true, rebateRate: 0.0005 },
+  { id: 'yub', name: '御匾會', rate: 0.0120, cashRate: 0.0115, hasMonthlyRebate: true, rebateRate: 0.0005 },
+  { id: 'jm1', name: '金門1',  rate: 0.0123, cashRate: 0.0115, hasMonthlyRebate: true, rebateRate: 0.0008 },
+  { id: 'jm8', name: '金門8',  rate: 0.0118, cashRate: 0.0115, hasMonthlyRebate: true, rebateRate: 0.0003 },
 ];
 
 // ============================================================================
@@ -674,23 +675,25 @@ function calcShareholderProfit(shareholder, allTxs, settings, month) {
   // 个人总洗码
   var personalWash = shTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
 
-  // 各厅盈利
+  // 各厅盈利（現結）和月退費分開計算
   var halls = settings.vipHalls || VIP_HALLS;
   var hallProfit = {};
-  var totalProfit = 0;
-  var monthlyRebate = 0;
+  var totalProfit = 0;   // 盈利(現結)
+  var monthlyRebate = 0; // 月退費
 
   halls.forEach(function(hall) {
     var wash = hallWash[hall.id] || 0;
     var washRaw = wash * 10000;
-    var profit = washRaw * hall.rate;
+    var cashRate = hall.cashRate || hall.rate; // 向後相容：無 cashRate 時用 rate
+    var profit = washRaw * cashRate;           // 盈利 = 洗碼 × 現結%
     hallProfit[hall.id] = { wash: wash, profit: profit };
     totalProfit += profit;
     if (hall.hasMonthlyRebate) {
-      monthlyRebate += washRaw * hall.rebateRate;
+      monthlyRebate += washRaw * hall.rebateRate;  // 月退費 = 洗碼 × 月退%
     }
   });
 
+  // totalProfit 用於分潤計算 = 盈利 + 月退費 = 合計
   totalProfit += monthlyRebate;
 
   return {
@@ -3050,34 +3053,46 @@ var AgentPage = (function() {
 
 // === src/pages/shareholder.js ===
 /**
- * pages/shareholder.js — 股东分润页
- * 50/50分潤公式 + 額外收入 + 洗碼明細
+ * pages/shareholder.js — 股東分潤頁 v11
+ * 佈局: 費率藥丸 → 摘要條 → 分潤明細(含匯率藥丸) → 額外收入 → 圖表+明細雙欄 → 股東KPI
  */
 var ShareholderPage = (function() {
+  var _currentMonth = '';
+
+  function hallClass(hallId) {
+    if (hallId === 'lyi') return 'sh-hall-lyi';
+    if (hallId === 'yub') return 'sh-hall-yub';
+    if (hallId === 'jm1') return 'sh-hall-jm1';
+    if (hallId === 'jm8') return 'sh-hall-jm8';
+    return '';
+  }
+
+  function fmtHK(n) {
+    return Math.round(n).toLocaleString();
+  }
+
+  function fmtWan(n) {
+    var v = Math.round(n * 100) / 100;
+    if (Math.abs(v - Math.round(v)) < 1e-6) return String(Math.round(v));
+    return v.toFixed(2).replace(/\.?0+$/, '');
+  }
+
   function render() {
     var shareholders = Shareholders.getAll();
     var mtxs = MemberTxs.getAll();
     var settings = Settings.get();
-    var currentMonth = new Date().toISOString().slice(0, 7);
+    var halls = Settings.getVipHalls();
+    _currentMonth = new Date().toISOString().slice(0, 7);
 
-    var html = '';
-    html += '<div class="card">';
-    html += '<div class="card-header"><h3>股東分潤</h3>';
-    html += '<div style="display:flex;gap:8px;align-items:center;">';
-    html += '<input type="month" id="sh-month" class="form-input" style="width:auto;" value="' + currentMonth + '" onchange="ShareholderPage.changeMonth(this.value)">';
-    html += '<button class="btn btn-primary" onclick="ShareholderPage.showAdd()">+ 新增股東</button>';
-    html += '</div>';
-    html += '</div>';
-
-    // 计算总洗码和总盈利
+    // 當月交易
     var monthTxs = mtxs.filter(function(t) {
-      return t.date && t.date.substring(0, 7) === currentMonth;
+      return t.date && t.date.substring(0, 7) === _currentMonth;
     });
 
+    // 計算各廳洗碼
     var totalWash = 0;
     var hallWash = {};
-    VIP_HALLS.forEach(function(h) { hallWash[h.id] = 0; });
-
+    halls.forEach(function(h) { hallWash[h.id] = 0; });
     monthTxs.forEach(function(tx) {
       totalWash += (tx.washCode || 0);
       if (hallWash[tx.vipHallId] !== undefined) {
@@ -3085,98 +3100,304 @@ var ShareholderPage = (function() {
       }
     });
 
-    // 总盈利
-    var totalProfit = 0;
-    var monthlyRebate = 0;
-    VIP_HALLS.forEach(function(hall) {
-      var washRaw = (hallWash[hall.id] || 0) * 10000;
-      totalProfit += washRaw * hall.rate;
-      if (hall.hasMonthlyRebate) {
-        monthlyRebate += washRaw * hall.rebateRate;
-      }
+    // 計算各廳盈利(現結)和月退費
+    var hallData = {};
+    var totalProfit = 0;   // 盈利(現結)
+    var totalRebate = 0;   // 月退費
+    halls.forEach(function(hall) {
+      var wash = hallWash[hall.id] || 0;
+      var washRaw = wash * 10000;
+      var cashRate = hall.cashRate || hall.rate;
+      var profit = washRaw * cashRate;
+      var rebate = hall.hasMonthlyRebate ? washRaw * hall.rebateRate : 0;
+      hallData[hall.id] = { wash: wash, profit: profit, rebate: rebate, total: profit + rebate };
+      totalProfit += profit;
+      totalRebate += rebate;
     });
-    totalProfit += monthlyRebate;
+    var grandTotal = totalProfit + totalRebate; // 合計
 
-    // 额外收入
-    var extraIncomes = ExtraIncome.getByMonth(currentMonth);
+    // 額外收入
+    var extraIncomes = ExtraIncome.getByMonth(_currentMonth);
     var extraProfit = extraIncomes.reduce(function(s, e) { return s + (e.amountHK || 0); }, 0);
 
-    var totalShares = shareholders.reduce(function(s, sh) { return s + (sh.shares || 0); }, 0);
-    var monthlyRate = Settings.getMonthlyRate(currentMonth);
+    // 匯率
+    var monthlyRate = Settings.getMonthlyRate(_currentMonth);
+    var exchangeRate = monthlyRate.shareholderRate || 4.1;
 
-    html += '<div class="summary-grid">';
-    html += '<div class="summary-item"><label>當月總洗碼</label><span>' + totalWash.toFixed(2) + ' 萬</span></div>';
-    html += '<div class="summary-item"><label>總盈利(HK)</label><span>' + Math.round(totalProfit).toLocaleString() + '</span></div>';
-    html += '<div class="summary-item"><label>額外收入(HK)</label><span>' + Math.round(extraProfit).toLocaleString() + '</span></div>';
-    html += '<div class="summary-item"><label>總股數</label><span>' + totalShares + '</span></div>';
+    var totalShares = shareholders.reduce(function(s, sh) { return s + (sh.shares || 0); }, 0);
+
+    var html = '';
+    html += '<div class="sh-page">';
+
+    // ===== 1. 費率條件藥丸條 =====
+    html += '<div class="sh-rate-bar">';
+    html += '<span class="sh-rate-bar-label">費率條件</span>';
+    halls.forEach(function(hall) {
+      var cashPct = ((hall.cashRate || hall.rate) * 100).toFixed(2);
+      var rebatePct = (hall.rebateRate * 100).toFixed(2);
+      var totalPct = (hall.rate * 100).toFixed(2);
+      html += '<div class="sh-rate-pill ' + hallClass(hall.id) + '" onclick="ShareholderPage.editRate(\'' + hall.id + '\')">';
+      html += '<span class="sh-rate-dot"></span>';
+      html += '<span class="sh-rate-name">' + hall.name + '</span>';
+      html += '<span class="sh-rate-vals">退傭<b>' + totalPct + '</b>/現結<b>' + cashPct + '</b>/月退<b>' + rebatePct + '</b></span>';
+      html += '</div>';
+    });
     html += '</div>';
 
-    // 各厅洗码
-    html += '<table class="data-table compact"><thead><tr>';
-    html += '<th>貴賓廳</th><th>費率</th><th>洗碼(萬)</th><th>盈利(HK)</th>';
-    html += '</tr></thead><tbody>';
-    VIP_HALLS.forEach(function(hall) {
-      var wash = hallWash[hall.id] || 0;
-      var profit = wash * 10000 * hall.rate;
-      html += '<tr><td>' + hall.name + '</td><td>' + (hall.rate * 100).toFixed(2) + '%</td>';
-      html += '<td>' + wash.toFixed(2) + '</td><td>' + Math.round(profit).toLocaleString() + '</td></tr>';
-    });
-    if (monthlyRebate > 0) {
-      html += '<tr><td>月退費</td><td>-</td><td>-</td><td>' + Math.round(monthlyRebate).toLocaleString() + '</td></tr>';
-    }
-    html += '</tbody></table>';
+    // ===== 2. 摘要條 =====
+    html += '<div class="sh-summary-bar">';
+    html += '<div class="sh-summary-cell"><label>當月總洗碼</label><span>' + fmtWan(totalWash) + ' 萬</span></div>';
+    html += '<div class="sh-summary-divider"></div>';
+    html += '<div class="sh-summary-cell"><label>總盈利(HK)</label><span>' + fmtHK(totalProfit) + '</span></div>';
+    html += '<div class="sh-summary-divider"></div>';
+    html += '<div class="sh-summary-cell"><label>總月退費(HK)</label><span>' + fmtHK(totalRebate) + '</span></div>';
+    html += '<div class="sh-summary-divider"></div>';
+    html += '<div class="sh-summary-cell"><label>額外收入(HK)</label><span>' + fmtHK(extraProfit) + '</span></div>';
+    html += '<div class="sh-summary-divider"></div>';
+    html += '<div class="sh-summary-cell"><label>股東數</label><span>' + shareholders.length + '</span></div>';
+    html += '</div>';
 
-    // 股东分润表
+    // ===== 3. 分潤明細 =====
+    html += '<div class="sh-card">';
+    html += '<div class="sh-card-header">';
+    html += '<h3 class="sh-section-title">分潤明細</h3>';
+    html += '<button class="btn btn-primary btn-sm" onclick="ShareholderPage.showAdd()">+ 新增股東</button>';
+    html += '</div>';
+
+    // 匯率藥丸
+    html += '<div class="sh-rate-row">';
+    html += '<div class="sh-exchange-pill">';
+    html += '<label>1 HKD =</label>';
+    html += '<input type="number" step="0.01" value="' + exchangeRate + '" onchange="ShareholderPage.updateRate(this.value)">';
+    html += '<span class="sh-exchange-unit">TWD</span>';
+    html += '</div>';
+    html += '</div>';
+
     if (shareholders.length > 0 && totalShares > 0) {
-      html += '<h4 style="margin-top:20px;">分潤明細</h4>';
-      html += '<table class="data-table"><thead><tr>';
-      html += '<th>股東</th><th>持股</th><th>洗碼(萬)</th><th>貢獻度</th>';
-      html += '<th>資金股50%(HK)</th><th>貢獻可得(HK)</th><th>合計應付(HK)</th><th>合計應付(TW)</th>';
+      html += '<table class="sh-profit-table"><thead><tr>';
+      html += '<th>股東</th><th>持股</th><th>洗碼(萬)</th>';
+      html += '<th>資金股50%(HK)</th><th>貢獻可得(HK)</th><th>額外收入(HK)</th>';
+      html += '<th>合計應付(HK)</th><th>合計應付(TW)</th>';
       html += '</tr></thead><tbody>';
 
+      var sumHK = 0, sumTW = 0;
       shareholders.forEach(function(sh) {
-        var profitData = calcShareholderProfit(sh, monthTxs, settings, currentMonth);
-        var totalData = calcShareholderTotal(profitData, shareholders, totalWash, totalProfit, extraProfit);
+        var profitData = calcShareholderProfit(sh, monthTxs, settings, _currentMonth);
+        var totalData = calcShareholderTotal(profitData, shareholders, totalWash, grandTotal, extraProfit);
+        var extraShare = extraProfit * (sh.shares / totalShares);
+        sumHK += totalData.totalPayableHK;
+        sumTW += totalData.totalPayableTW;
 
         html += '<tr>';
         html += '<td>' + sh.name + '</td>';
         html += '<td>' + sh.shares + '</td>';
-        html += '<td>' + profitData.personalWash.toFixed(2) + '</td>';
-        html += '<td>' + (totalData.contribution * 100).toFixed(1) + '%</td>';
-        html += '<td>' + Math.round(totalData.capital50).toLocaleString() + '</td>';
-        html += '<td>' + Math.round(totalData.contribution50).toLocaleString() + '</td>';
-        html += '<td>' + Math.round(totalData.totalPayableHK).toLocaleString() + '</td>';
-        html += '<td class="num">' + Math.round(totalData.totalPayableTW).toLocaleString() + '</td>';
+        html += '<td>' + fmtWan(profitData.personalWash) + '</td>';
+        html += '<td class="num">' + fmtHK(totalData.capital50) + '</td>';
+        html += '<td class="num">' + fmtHK(totalData.contribution50) + '</td>';
+        html += '<td class="num">' + fmtHK(extraShare) + '</td>';
+        html += '<td class="num">' + fmtHK(totalData.totalPayableHK) + '</td>';
+        html += '<td class="num num-positive">' + fmtHK(totalData.totalPayableTW) + '</td>';
         html += '</tr>';
       });
 
+      html += '<tr class="total-row">';
+      html += '<td>合計</td><td>' + totalShares + '</td><td>' + fmtWan(totalWash) + '</td>';
+      html += '<td class="num">—</td><td class="num">—</td><td class="num">' + fmtHK(extraProfit) + '</td>';
+      html += '<td class="num">' + fmtHK(sumHK) + '</td>';
+      html += '<td class="num num-positive">' + fmtHK(sumTW) + '</td>';
+      html += '</tr>';
       html += '</tbody></table>';
+    } else {
+      html += '<div class="empty-state">尚無股東資料</div>';
     }
+    html += '</div>';
 
-    // 额外收入管理
-    html += '<div style="margin-top:20px;">';
-    html += '<h4>額外收入</h4>';
+    // ===== 4. 額外收入 =====
+    html += '<div class="sh-card sh-extra-section">';
+    html += '<div class="sh-card-header">';
+    html += '<h3 class="sh-section-title">額外收入</h3>';
+    html += '<button class="btn-sm" onclick="ShareholderPage.showAddExtra()">+ 新增</button>';
+    html += '</div>';
     if (extraIncomes.length > 0) {
-      html += '<table class="data-table compact"><thead><tr>';
-      html += '<th>描述</th><th>金額(HK)</th><th>操作</th>';
+      html += '<table class="sh-extra-table"><thead><tr>';
+      html += '<th>描述</th><th>金額(HK)</th><th>金額(TW)</th><th>操作</th>';
       html += '</tr></thead><tbody>';
       extraIncomes.forEach(function(e) {
-        html += '<tr><td>' + e.description + '</td><td>' + e.amountHK + '</td>';
-        html += '<td><button class="btn-sm btn-danger" onclick="ShareholderPage.delExtra(\'' + e.id + '\')">刪</button></td></tr>';
+        html += '<tr>';
+        html += '<td>' + (e.description || '') + '</td>';
+        html += '<td class="num">' + fmtHK(e.amountHK || 0) + '</td>';
+        html += '<td class="num">' + fmtHK((e.amountHK || 0) * exchangeRate) + '</td>';
+        html += '<td><button class="btn-sm" onclick="ShareholderPage.editExtra(\'' + e.id + '\')">編輯</button> ';
+        html += '<button class="btn-sm btn-danger" onclick="ShareholderPage.delExtra(\'' + e.id + '\')">刪</button></td>';
+        html += '</tr>';
       });
+      html += '<tr class="total-row"><td>合計</td><td class="num">' + fmtHK(extraProfit) + '</td><td class="num">' + fmtHK(extraProfit * exchangeRate) + '</td><td></td></tr>';
       html += '</tbody></table>';
+      html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);margin-top:4px;">依持股比例分配至各股東</p>';
+    } else {
+      html += '<div class="empty-state">尚無額外收入</div>';
     }
-    html += '<button class="btn-sm" onclick="ShareholderPage.showAddExtra()">+ 新增額外收入</button>';
     html += '</div>';
 
+    // ===== 5. 圖表 + 明細雙欄 =====
+    html += '<div class="sh-dual-col">';
+
+    // 左：柱狀圖
+    html += '<div class="sh-chart-card">';
+    html += '<h4>全廳洗碼分布</h4>';
+    html += '<div class="sh-bar-chart">';
+    var maxWash = 1;
+    halls.forEach(function(h) { if (hallWash[h.id] > maxWash) maxWash = hallWash[h.id]; });
+    halls.forEach(function(hall) {
+      var wash = hallWash[hall.id] || 0;
+      var pct = maxWash > 0 ? (wash / maxWash * 100) : 0;
+      var sharePct = totalWash > 0 ? (wash / totalWash * 100).toFixed(1) : '0.0';
+      var fillColor = hall.id === 'lyi' ? 'var(--hall-lyi)' : hall.id === 'yub' ? 'var(--hall-yub)' : hall.id === 'jm1' ? 'var(--hall-jm1)' : 'var(--hall-jm8)';
+      html += '<div class="sh-bar-row">';
+      html += '<span class="sh-bar-label">' + hall.name + '</span>';
+      html += '<div class="sh-bar-track">';
+      html += '<div class="sh-bar-fill" style="width:' + pct + '%;background:' + fillColor + ';"><span>' + fmtWan(wash) + '</span></div>';
+      html += '</div>';
+      html += '<span class="sh-bar-percent">' + sharePct + '%</span>';
+      html += '</div>';
+    });
+    html += '<div style="border-top:1px dashed var(--border);margin-top:4px;padding-top:4px;display:flex;justify-content:space-between;font-size:var(--font-size-sm);color:var(--text-secondary);">';
+    html += '<span>總計</span><span style="font-weight:700;color:var(--text-primary);">' + fmtWan(totalWash) + ' 萬</span>';
     html += '</div>';
+    html += '</div>';
+    html += '</div>';
+
+    // 右：貴賓廳明細
+    html += '<div class="sh-chart-card">';
+    html += '<h4>貴賓廳明細</h4>';
+    html += '<table class="sh-hall-detail-table"><thead><tr>';
+    html += '<th>貴賓廳</th><th>洗碼(萬)</th><th>盈利(HK)</th><th>月退費(HK)</th><th>合計(HK)</th><th>佔比</th>';
+    html += '</tr></thead><tbody>';
+    halls.forEach(function(hall) {
+      var d = hallData[hall.id];
+      var sharePct = totalWash > 0 ? (d.wash / totalWash * 100).toFixed(1) : '0.0';
+      html += '<tr>';
+      html += '<td><span class="sh-rate-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:';
+      html += hall.id === 'lyi' ? 'var(--hall-lyi)' : hall.id === 'yub' ? 'var(--hall-yub)' : hall.id === 'jm1' ? 'var(--hall-jm1)' : 'var(--hall-jm8)';
+      html += ';"></span>' + hall.name + '</td>';
+      html += '<td>' + fmtWan(d.wash) + '</td>';
+      html += '<td>' + fmtHK(d.profit) + '</td>';
+      html += '<td>' + fmtHK(d.rebate) + '</td>';
+      html += '<td>' + fmtHK(d.total) + '</td>';
+      html += '<td>' + sharePct + '%</td>';
+      html += '</tr>';
+    });
+    html += '<tr class="total-row">';
+    html += '<td>總計</td>';
+    html += '<td>' + fmtWan(totalWash) + '</td>';
+    html += '<td>' + fmtHK(totalProfit) + '</td>';
+    html += '<td>' + fmtHK(totalRebate) + '</td>';
+    html += '<td>' + fmtHK(grandTotal) + '</td>';
+    html += '<td>100%</td>';
+    html += '</tr>';
+    html += '</tbody></table>';
+    html += '</div>';
+
+    html += '</div>'; // dual-col end
+
+    // ===== 6. 股東 KPI 卡片 =====
+    if (shareholders.length > 0) {
+      html += '<div class="sh-card">';
+      html += '<div class="sh-card-header"><h3 class="sh-section-title">各股東洗碼 KPI</h3></div>';
+      html += '<div class="sh-kpi-grid">';
+      shareholders.forEach(function(sh) {
+        var profitData = calcShareholderProfit(sh, monthTxs, settings, _currentMonth);
+        var shWash = profitData.personalWash;
+        var sharePct = totalShares > 0 ? (sh.shares / totalShares * 100).toFixed(1) : '0';
+
+        html += '<div class="sh-kpi-card">';
+        html += '<div class="sh-kpi-header">';
+        html += '<span class="sh-kpi-name">' + sh.name + '</span>';
+        html += '<span class="sh-kpi-shares">持股 ' + sharePct + '%</span>';
+        html += '</div>';
+        html += '<div class="sh-kpi-body">';
+        halls.forEach(function(hall) {
+          var hw = profitData.hallWash[hall.id] || 0;
+          if (hw === 0) return;
+          var fillColor = hall.id === 'lyi' ? 'var(--hall-lyi)' : hall.id === 'yub' ? 'var(--hall-yub)' : hall.id === 'jm1' ? 'var(--hall-jm1)' : 'var(--hall-jm8)';
+          html += '<div class="sh-kpi-hall-row">';
+          html += '<span class="sh-kpi-hall-name"><span class="sh-rate-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + fillColor + ';"></span>' + hall.name + '</span>';
+          html += '<span class="sh-kpi-hall-val">' + fmtWan(hw) + ' 萬</span>';
+          html += '</div>';
+        });
+        if (shWash === 0) {
+          html += '<div style="font-size:var(--font-size-sm);color:var(--text-muted);text-align:center;padding:8px;">本月無洗碼</div>';
+        }
+        html += '</div>';
+        html += '<div class="sh-kpi-footer">';
+        html += '<label>總洗碼</label>';
+        html += '<span class="sh-kpi-total">' + fmtWan(shWash) + ' 萬</span>';
+        html += '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+      html += '</div>';
+    }
+
+    html += '</div>'; // sh-page end
 
     var container = document.getElementById('page-shareholder');
     if (container) container.innerHTML = html;
   }
 
-  function changeMonth(month) { render(); }
+  // ========== 匯率更新 ==========
+  function updateRate(val) {
+    var rate = parseFloat(val) || 4.1;
+    var s = Settings.get();
+    if (!s.monthlyRates) s.monthlyRates = {};
+    if (!s.monthlyRates[_currentMonth]) s.monthlyRates[_currentMonth] = {};
+    s.monthlyRates[_currentMonth].shareholderRate = rate;
+    s.monthlyRates[_currentMonth].exchangeRate = rate;
+    Settings.save(s);
+    Toast.success('匯率已更新為 ' + rate);
+    render();
+  }
 
+  // ========== 費率編輯 ==========
+  function editRate(hallId) {
+    var halls = Settings.getVipHalls();
+    var hall = halls.find(function(h) { return h.id === hallId; });
+    if (!hall) return;
+
+    var html = '<div class="form-group"><label>貴賓廳</label><input type="text" class="form-input" value="' + hall.name + '" id="rate-name" readonly></div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>退傭(%)</label><input type="number" step="0.01" class="form-input" value="' + (hall.rate * 100).toFixed(2) + '" id="rate-total" readonly></div>';
+    html += '<div class="form-group"><label>現結(%)</label><input type="number" step="0.01" class="form-input" value="' + ((hall.cashRate || hall.rate) * 100).toFixed(2) + '" id="rate-cash" oninput="ShareholderPage.calcTotalRate()"></div>';
+    html += '<div class="form-group"><label>月退(%)</label><input type="number" step="0.01" class="form-input" value="' + (hall.rebateRate * 100).toFixed(2) + '" id="rate-rebate" oninput="ShareholderPage.calcTotalRate()"></div>';
+    html += '</div>';
+    html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);">退傭 = 現結 + 月退（自動計算）</p>';
+    html += '<div style="text-align:right;margin-top:16px;"><button class="btn btn-primary" onclick="ShareholderPage.saveRate(\'' + hallId + '\')">儲存</button></div>';
+    Modal.open('編輯費率 — ' + hall.name, html);
+  }
+
+  function calcTotalRate() {
+    var cash = parseFloat(document.getElementById('rate-cash').value) || 0;
+    var rebate = parseFloat(document.getElementById('rate-rebate').value) || 0;
+    document.getElementById('rate-total').value = (cash + rebate).toFixed(2);
+  }
+
+  function saveRate(hallId) {
+    var cash = parseFloat(document.getElementById('rate-cash').value) || 0;
+    var rebate = parseFloat(document.getElementById('rate-rebate').value) || 0;
+    var halls = Settings.getVipHalls();
+    var idx = halls.findIndex(function(h) { return h.id === hallId; });
+    if (idx < 0) return;
+    halls[idx].cashRate = cash / 100;
+    halls[idx].rebateRate = rebate / 100;
+    halls[idx].rate = (cash + rebate) / 100;
+    halls[idx].hasMonthlyRebate = rebate > 0;
+    Settings.updateVipHalls(halls);
+    Modal.close();
+    Toast.success('費率已更新');
+    render();
+  }
+
+  // ========== 新增股東 ==========
   function showAdd() {
     var html = '<div class="form-group"><label>股東名稱</label><input type="text" id="sh-name" class="form-input"></div>';
     html += '<div class="form-group"><label>持股數</label><input type="number" step="1" id="sh-shares" class="form-input" value="1"></div>';
@@ -3194,8 +3415,8 @@ var ShareholderPage = (function() {
     render();
   }
 
+  // ========== 額外收入 CRUD ==========
   function showAddExtra() {
-    var month = document.getElementById('sh-month').value;
     var html = '<div class="form-group"><label>描述</label><input type="text" id="ei-desc" class="form-input"></div>';
     html += '<div class="form-group"><label>金額(HK)</label><input type="number" id="ei-amount" class="form-input"></div>';
     html += '<div style="text-align:right;margin-top:16px;"><button class="btn btn-primary" onclick="ShareholderPage.saveExtra()">儲存</button></div>';
@@ -3203,14 +3424,33 @@ var ShareholderPage = (function() {
   }
 
   function saveExtra() {
-    var month = document.getElementById('sh-month').value;
     ExtraIncome.create({
-      month: month,
+      month: _currentMonth,
       description: document.getElementById('ei-desc').value,
       amountHK: parseFloat(document.getElementById('ei-amount').value) || 0,
     });
     Modal.close();
     Toast.success('已新增');
+    render();
+  }
+
+  function editExtra(id) {
+    var items = ExtraIncome.getByMonth(_currentMonth);
+    var e = items.find(function(x) { return x.id === id; });
+    if (!e) return;
+    var html = '<div class="form-group"><label>描述</label><input type="text" id="ei-desc" class="form-input" value="' + (e.description || '') + '"></div>';
+    html += '<div class="form-group"><label>金額(HK)</label><input type="number" id="ei-amount" class="form-input" value="' + (e.amountHK || 0) + '"></div>';
+    html += '<div style="text-align:right;margin-top:16px;"><button class="btn btn-primary" onclick="ShareholderPage.saveEditExtra(\'' + id + '\')">儲存</button></div>';
+    Modal.open('編輯額外收入', html);
+  }
+
+  function saveEditExtra(id) {
+    ExtraIncome.update(id, {
+      description: document.getElementById('ei-desc').value,
+      amountHK: parseFloat(document.getElementById('ei-amount').value) || 0,
+    });
+    Modal.close();
+    Toast.success('已更新');
     render();
   }
 
@@ -3220,7 +3460,14 @@ var ShareholderPage = (function() {
     render();
   }
 
-  return { render: render, changeMonth: changeMonth, showAdd: showAdd, save: save, showAddExtra: showAddExtra, saveExtra: saveExtra, delExtra: delExtra };
+  return {
+    render: render,
+    updateRate: updateRate,
+    editRate: editRate, calcTotalRate: calcTotalRate, saveRate: saveRate,
+    showAdd: showAdd, save: save,
+    showAddExtra: showAddExtra, saveExtra: saveExtra,
+    editExtra: editExtra, saveEditExtra: saveEditExtra, delExtra: delExtra,
+  };
 })();
 
 
