@@ -3575,7 +3575,7 @@ var ShareholderPage = (function() {
       html += '<table class="sh-profit-table"><thead><tr>';
       html += '<th>股東</th><th>持股</th><th>洗碼(萬)</th>';
       html += '<th class="num">資金股50%(HK)</th><th style="text-align:center;">貢獻度</th><th class="num">貢獻可得(HK)</th><th class="num">額外收入(HK)</th>';
-      html += '<th class="num">合計應付(HK)</th><th class="num">合計應付(TW)</th>';
+      html += '<th class="num">合計應付(HK)</th><th class="num">合計應付(TW)</th><th style="text-align:center;">操作</th>';
       html += '</tr></thead><tbody>';
 
       var SH_COLORS = ['#378ADD', '#1D9E75', '#EF9F27', '#D4537E', '#7F77DD'];
@@ -3609,6 +3609,10 @@ var ShareholderPage = (function() {
         html += '<td class="num">' + fmtHK(extraShare) + '</td>';
         html += '<td class="num">' + fmtHK(totalData.totalPayableHK) + '</td>';
         html += '<td class="num num-positive">' + fmtHK(totalData.totalPayableTW) + '</td>';
+        html += '<td style="text-align:center;white-space:nowrap;">';
+        html += '<button class="btn-sm" onclick="ShareholderPage.editShareholder(\'' + sh.id + '\')">編輯</button> ';
+        html += '<button class="btn-sm btn-danger" onclick="ShareholderPage.delShareholder(\'' + sh.id + '\')">刪</button>';
+        html += '</td>';
         html += '</tr>';
       });
 
@@ -3617,6 +3621,7 @@ var ShareholderPage = (function() {
       html += '<td class="num">—</td><td style="text-align:center;">100%</td><td class="num">—</td><td class="num">' + fmtHK(totalExtra) + '</td>';
       html += '<td class="num">' + fmtHK(sumHK) + '</td>';
       html += '<td class="num num-positive">' + fmtHK(sumTW) + '</td>';
+      html += '<td></td>';
       html += '</tr>';
       html += '</tbody></table>';
 
@@ -3870,6 +3875,34 @@ var ShareholderPage = (function() {
     render();
   }
 
+  function editShareholder(id) {
+    var sh = Shareholders.getById(id);
+    if (!sh) return;
+    var html = '<div class="form-group"><label>股東名稱</label><input type="text" id="sh-name" class="form-input" value="' + (sh.name || '') + '"></div>';
+    html += '<div class="form-group"><label>持股數</label><input type="number" step="1" id="sh-shares" class="form-input" value="' + (sh.shares || 0) + '"></div>';
+    html += '<div style="text-align:right;margin-top:16px;"><button class="btn btn-primary" onclick="ShareholderPage.saveEditShareholder(\'' + id + '\')">儲存</button></div>';
+    Modal.open('編輯股東', html);
+  }
+
+  function saveEditShareholder(id) {
+    var name = document.getElementById('sh-name').value;
+    var shares = parseInt(document.getElementById('sh-shares').value) || 0;
+    if (!name) { Toast.error('股東名稱必填'); return; }
+    Shareholders.update(id, { name: name, shares: shares });
+    Modal.close();
+    Toast.success('股東已更新');
+    render();
+  }
+
+  function delShareholder(id) {
+    var sh = Shareholders.getById(id);
+    if (!sh) return;
+    if (!confirm('確定刪除股東「' + sh.name + '」？此操作不可復原。')) return;
+    Shareholders.remove(id);
+    Toast.success('股東已刪除');
+    render();
+  }
+
   // ========== 額外收入 CRUD ==========
   function showAddExtra() {
     var html = '<div class="form-group"><label>描述</label><input type="text" id="ei-desc" class="form-input"></div>';
@@ -3920,6 +3953,7 @@ var ShareholderPage = (function() {
     updateRate: updateRate,
     editRate: editRate, calcTotalRate: calcTotalRate, saveRate: saveRate,
     showAdd: showAdd, save: save,
+    editShareholder: editShareholder, saveEditShareholder: saveEditShareholder, delShareholder: delShareholder,
     showAddExtra: showAddExtra, saveExtra: saveExtra,
     editExtra: editExtra, saveEditExtra: saveEditExtra, delExtra: delExtra,
   };
