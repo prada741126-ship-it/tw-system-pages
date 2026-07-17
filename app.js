@@ -3359,10 +3359,11 @@ var ShareholderPage = (function() {
     html += '<h3 class="sh-section-title">額外收入</h3>';
     html += '<button class="btn-sm" onclick="ShareholderPage.showAddExtra()">+ 新增</button>';
     html += '</div>';
-    if (extraIncomes.length > 0) {
+    if (extraIncomes.length > 0 || ticketProfits.length > 0) {
       html += '<table class="sh-extra-table"><thead><tr>';
       html += '<th>描述</th><th>金額(HK)</th><th>金額(TW)</th><th>操作</th>';
       html += '</tr></thead><tbody>';
+      // 手動額外收入
       extraIncomes.forEach(function(e) {
         html += '<tr>';
         html += '<td>' + (e.description || '') + '</td>';
@@ -3372,7 +3373,18 @@ var ShareholderPage = (function() {
         html += '<button class="btn-sm btn-danger" onclick="ShareholderPage.delExtra(\'' + e.id + '\')">刪</button></td>';
         html += '</tr>';
       });
-      html += '<tr class="total-row"><td>合計</td><td class="num">' + fmtHK(extraProfit) + '</td><td class="num">' + fmtHK(extraProfit * exchangeRate) + '</td><td></td></tr>';
+      // 門票利潤（只讀）
+      ticketProfits.forEach(function(tp) {
+        var dateParts = (tp.date || '').split('-');
+        var dateDisplay = dateParts.length === 3 ? (parseInt(dateParts[1]) + '/' + parseInt(dateParts[2])) : tp.date;
+        html += '<tr style="background:var(--bg-tertiary);">';
+        html += '<td>' + dateDisplay + ' ' + tp.agentName + ' ' + tp.itemName + '</td>';
+        html += '<td class="num">' + fmtHK(tp.profitHK) + '</td>';
+        html += '<td class="num">' + fmtHK(tp.profitHK * exchangeRate) + '</td>';
+        html += '<td style="color:var(--text-secondary);font-size:var(--font-size-sm);">自動</td>';
+        html += '</tr>';
+      });
+      html += '<tr class="total-row"><td>合計</td><td class="num">' + fmtHK(totalExtra) + '</td><td class="num">' + fmtHK(totalExtra * exchangeRate) + '</td><td></td></tr>';
       html += '</tbody></table>';
       html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);margin-top:4px;">依持股比例分配至各股東</p>';
     } else {
@@ -3440,34 +3452,6 @@ var ShareholderPage = (function() {
     html += '</div>';
 
     html += '</div>'; // dual-col end
-
-    // ===== 5.5 門票利潤明細 =====
-    if (ticketProfits.length > 0) {
-      html += '<div class="sh-card">';
-      html += '<div class="sh-card-header"><h3 class="sh-section-title">門票利潤明細</h3></div>';
-      html += '<table class="sh-extra-table"><thead><tr>';
-      html += '<th>日期</th><th>代理</th><th>項目</th><th class="num">利潤(HK)</th>';
-      html += '</tr></thead><tbody>';
-      ticketProfits.forEach(function(tp) {
-        var dateParts = (tp.date || '').split('-');
-        var dateDisplay = dateParts.length === 3 ? (parseInt(dateParts[1]) + '/' + parseInt(dateParts[2])) : tp.date;
-        html += '<tr>';
-        html += '<td>' + dateDisplay + '</td>';
-        html += '<td>' + tp.agentName + '</td>';
-        html += '<td>' + tp.itemName + '</td>';
-        var cls = tp.profitHK >= 0 ? 'num num-positive' : 'num num-negative';
-        html += '<td class="' + cls + '">' + fmtHK(tp.profitHK) + '</td>';
-        html += '</tr>';
-      });
-      html += '<tr class="total-row">';
-      html += '<td colspan="3">合計</td>';
-      var totalCls = totalTicketProfit >= 0 ? 'num num-positive' : 'num num-negative';
-      html += '<td class="' + totalCls + '">' + fmtHK(totalTicketProfit) + '</td>';
-      html += '</tr>';
-      html += '</tbody></table>';
-      html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);margin-top:4px;">利潤 = 會員購入價 - 我們購買價，依持股比例分配至各股東</p>';
-      html += '</div>';
-    }
 
     // ===== 6. 股東 KPI 卡片 =====
     if (shareholders.length > 0) {
