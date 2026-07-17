@@ -436,6 +436,9 @@ a { color: var(--accent); text-decoration: none; }
 .mb-card-val {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: var(--spacing-xs);
 }
 
 /* 負數紅色 / 正數綠色 */
@@ -490,6 +493,7 @@ a { color: var(--accent); text-decoration: none; }
   font-size: var(--font-size-xl);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .mb-card-actions {
   display: flex;
@@ -759,6 +763,6 @@ a { color: var(--accent); text-decoration: none; }
 <!-- Toast -->
 <div id="toast-container" class="toast-container"></div>
 
-<script src="app.js?v=1784285836651"></script>
+<script src="app.js?v=1784286679863"></script>
 </body>
 </html>

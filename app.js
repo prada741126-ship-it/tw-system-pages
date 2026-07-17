@@ -2380,7 +2380,7 @@ var MemberPage = (function() {
           var m = Members.getById(tx.memberId);
           var hall = VIP_HALLS.find(function(h) { return h.id === tx.vipHallId; });
           var isNeg = (tx.upDown || 0) < 0;
-          var isWin = (tx.settlementAmount || 0) > 0;
+          var isWin = (tx.totalSettlement || 0) >= 0;
 
           html += '<div class="mb-card">';
 
@@ -2432,10 +2432,11 @@ var MemberPage = (function() {
           html += '</div>';
 
           // 底部：總交收 + 操作
+          var isWin = (tx.totalSettlement || 0) >= 0;
           html += '<div class="mb-card-footer">';
           html += '<div class="mb-card-total">';
           html += '<span class="mb-card-label">總交收金額NT</span>';
-          html += '<span class="mb-card-total-val ' + (isWin ? 'num-positive' : 'num-negative') + '">' + Math.round(tx.settlementAmount || 0).toLocaleString() + '</span>';
+          html += '<span class="mb-card-total-val ' + (isWin ? 'num-positive' : 'num-negative') + '">' + fmtCardNum(tx.totalSettlement || 0) + '</span>';
           html += '</div>';
           html += '<div class="mb-card-actions">';
           html += '<button class="btn-sm" onclick="MemberPage.editTx(\'' + tx.id + '\')">編輯</button>';
@@ -2450,11 +2451,11 @@ var MemberPage = (function() {
 
       // 合計行
       if (mtxs.length > 0) {
-        var totalSettle = mtxs.reduce(function(s, t) { return s + (t.settlementAmount || 0); }, 0);
+        var totalSettle = mtxs.reduce(function(s, t) { return s + (t.totalSettlement || 0); }, 0);
         var totalWash = mtxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
         html += '<div class="summary-row">';
         html += '<span>總洗碼: ' + fmtCardNum(totalWash) + ' 萬</span>';
-        html += '<span>合計交收: NT$ ' + Math.round(totalSettle).toLocaleString() + '</span>';
+        html += '<span>合計交收: NT$ ' + fmtCardNum(totalSettle) + '</span>';
         html += '</div>';
       }
 
