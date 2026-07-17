@@ -2613,11 +2613,15 @@ var MemberPage = (function() {
       } else {
         html += '<span style="flex:1;min-width:80px;display:flex;align-items:center;font-size:var(--font-size-sm);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (row.name || '') + '</span>';
       }
-      html += '<input type="number" step="1" min="1" placeholder="數量" class="form-input" style="width:60px;flex:0 0 60px;" value="' + (row.quantity || 1) + '" onchange="MemberPage._updExp(' + i + ',\'quantity\',this.value)">';
+      html += '<input type="number" step="1" min="1" placeholder="數量" class="form-input" style="width:60px;flex:0 0 60px;" value="' + (row.quantity || 1) + '" oninput="MemberPage._updExp(' + i + ',\'quantity\',this.value)">';
       html += '<input type="number" placeholder="金額" class="form-input" style="width:80px;flex:0 0 80px;" value="' + (row.amountHK || 0) + '" onchange="MemberPage._updExp(' + i + ',\'amountHK\',this.value)">';
       html += '<input type="number" step="0.01" placeholder="匯率" class="form-input" style="width:60px;flex:0 0 60px;" value="' + (row.exchangeRate || 4.2) + '" onchange="MemberPage._updExp(' + i + ',\'exchangeRate\',this.value)">';
       html += '<button class="btn-sm btn-danger" onclick="MemberPage._delExp(' + i + ')" style="flex:0 0 32px;padding:4px;">×</button>';
       html += '</div>';
+      // 非其他時顯示單價提示
+      if (row.ticketType && row.ticketType !== 'other' && row.unitPrice) {
+        html += '<div style="font-size:var(--font-size-sm);color:var(--text-secondary);padding-left:4px;margin-bottom:4px;">單價 ' + row.unitPrice + ' HK × ' + (row.quantity || 1) + ' = ' + ((row.unitPrice || 0) * (row.quantity || 1)) + ' HK</div>';
+      }
     });
     container.innerHTML = html;
   }
@@ -2629,7 +2633,6 @@ var MemberPage = (function() {
     if (val === 'other') {
       _expenseRows[i].name = '';
       _expenseRows[i].unitPrice = 0;
-      // amountHK 不強制歸零，保留讓使用者自行編輯
     } else if (val === 'wp') {
       var wp = tp.waterPark || { guestPrice: 450, ourPrice: 406 };
       _expenseRows[i].name = '水上樂園手帶';
@@ -2654,8 +2657,8 @@ var MemberPage = (function() {
       _expenseRows[i].quantity = parseInt(val) || 1;
       if (_expenseRows[i].ticketType && _expenseRows[i].ticketType !== 'other' && _expenseRows[i].unitPrice) {
         _expenseRows[i].amountHK = _expenseRows[i].unitPrice * _expenseRows[i].quantity;
-        renderExpenseRows();
       }
+      renderExpenseRows();
     } else {
       _expenseRows[i][field] = parseFloat(val) || 0;
     }
