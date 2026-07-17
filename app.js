@@ -987,6 +987,7 @@ function initFirebase() {
       }
     }
   });
+  return _initPromise;
 }
 
 function getDB() { return _db; }
