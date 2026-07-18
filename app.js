@@ -3735,19 +3735,6 @@ var RoomPage = (function() {
     html += '<button class="btn-sm" onclick="RoomPage.toggleFeePanel()">收起</button>';
     html += '</div>';
 
-    /* KPI cards */
-    html += '<div class="kpi-grid" style="padding:12px;">';
-    html += '<div class="kpi-card kpi-active"><div class="kpi-body"><div class="kpi-value">' + kpi.totalNights + '</div><div class="kpi-label">總房晚</div></div></div>';
-    html += '<div class="kpi-card kpi-highlight"><div class="kpi-body"><div class="kpi-value">' + (kpi.totalTh / 10000).toFixed(0) + '萬</div><div class="kpi-label">總門檻</div></div></div>';
-    html += '<div class="kpi-card kpi-normal"><div class="kpi-body"><div class="kpi-value">' + kpi.totalDiscount + '</div><div class="kpi-label">總折抵(天)</div></div></div>';
-    html += '<div class="kpi-card kpi-warning"><div class="kpi-body"><div class="kpi-value">' + kpi.totalRemaining + '</div><div class="kpi-label">總剩餘(天)</div></div></div>';
-    html += '<div class="kpi-card kpi-normal"><div class="kpi-body"><div class="kpi-value">' + kpi.freeCount + '</div><div class="kpi-label">免費房</div></div></div>';
-    html += '<div class="kpi-card kpi-warning"><div class="kpi-body"><div class="kpi-value">' + kpi.paidCount + '</div><div class="kpi-label">收費房</div></div></div>';
-    html += '<div class="kpi-card kpi-highlight"><div class="kpi-body"><div class="kpi-value">$' + kpi.totalCharge.toLocaleString() + '</div><div class="kpi-label">客收合計</div></div></div>';
-    html += '</div>';
-
-    /* Formula hint — 已移至主頁面 KPI 下方 */
-
     /* Table */
     if (rows.length === 0) {
       html += '<div class="empty-state" style="padding:24px;">此團無訂房</div>';
