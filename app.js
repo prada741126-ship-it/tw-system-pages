@@ -3153,6 +3153,13 @@ var RoomPage = (function() {
   var _filterFee = '';
   var _searchTimer = null;
   var PAGE_SIZE = 10;
+  var STATUS_LABELS = {
+    'pending': '待確認', 'confirmed': '已確認', 'checked-in': '已入住',
+    'checked-out': '已退房', 'cancelled': '已取消'
+  };
+  var FEE_LABELS = {
+    'auto': '自動', 'free': '免費', 'paid': '收費', 'discount': '折扣'
+  };
 
   var ICONS = {
     nights: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
@@ -3561,14 +3568,14 @@ var RoomPage = (function() {
     html += '<div class="form-group"><label>狀態</label>';
     html += '<select id="eb-status" class="form-input">';
     Object.values(BOOKING_STATUS).forEach(function(s) {
-      html += '<option value="' + s + '"' + (b.status === s ? ' selected' : '') + '>' + s + '</option>';
+      html += '<option value="' + s + '"' + (b.status === s ? ' selected' : '') + '>' + (STATUS_LABELS[s] || s) + '</option>';
     });
     html += '</select></div></div>';
     html += '<div class="form-row">';
     html += '<div class="form-group"><label>費用類型</label>';
     html += '<select id="eb-fee" class="form-input">';
     Object.values(FEE_TYPE).forEach(function(f) {
-      html += '<option value="' + f + '"' + (b.feeType === f ? ' selected' : '') + '>' + f + '</option>';
+      html += '<option value="' + f + '"' + (b.feeType === f ? ' selected' : '') + '>' + (FEE_LABELS[f] || f) + '</option>';
     });
     html += '</select></div>';
     html += '<div class="form-group"><label>向客人收</label><input type="number" id="eb-charge-guest" class="form-input" value="' + (b.chargeGuest || 0) + '"></div>';
