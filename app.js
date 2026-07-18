@@ -3198,7 +3198,7 @@ var RoomPage = (function() {
     /* === 頁面標頭 === */
     html += '<div class="card">';
     html += '<div class="card-header"><h3>房務管理</h3>';
-    html += '<div style="display:flex;gap:8px;align-items:center;">';
+    html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
     html += '<select id="room-trip-select" class="form-input" style="width:auto;" onchange="RoomPage.selectTrip(this.value)">';
     html += '<option value="">全部訂房</option>';
     trips.forEach(function(trip) {
@@ -3208,6 +3208,8 @@ var RoomPage = (function() {
     html += '</select>';
     if (_selectedTrip) {
       html += '<button class="btn btn-primary" onclick="RoomPage.showAddBooking()">+ 新增訂房</button>';
+      html += '<button class="btn" style="background:var(--accent);color:#fff;" onclick="RoomPage.goFees()">費用收取</button>';
+      html += '<button class="btn" style="background:var(--success);color:#fff;" onclick="RoomPage.goProfit()">利潤結算</button>';
     }
     html += '</div></div>';
 
@@ -3475,6 +3477,9 @@ var RoomPage = (function() {
 
   function selectTrip(tripId) { _selectedTrip = tripId || null; _page = 1; render(); }
 
+  function goFees() { window._targetTripId = _selectedTrip; Router.go('fees'); }
+  function goProfit() { window._targetTripId = _selectedTrip; Router.go('profit'); }
+
   /* ===== 新增訂房 ===== */
   function showAddBooking() {
     var trip = Trips.getById(_selectedTrip);
@@ -3627,6 +3632,7 @@ var RoomPage = (function() {
     showAddBooking: showAddBooking, onCasinoChange: onCasinoChange, onHotelChange: onHotelChange,
     saveBooking: saveBooking, editBooking: editBooking, saveEditBooking: saveEditBooking, delBooking: delBooking,
     goPage: goPage, onSearch: onSearch, sortByCol: sortByCol, setFeeFilter: setFeeFilter,
+    goFees: goFees, goProfit: goProfit,
   };
 })();
 
@@ -3652,8 +3658,17 @@ var FeesPage = (function() {
     var trips = Trips.getAll().filter(function(t) { return t.status !== TRIP_STATUS.SEALED; });
 
     var html = '';
-    /* 頁面標題 */
-    html += '<div class="card-header"><h3>費用收取</h3></div>';
+
+    /* 自動接收來自房務管理的團 */
+    if (window._targetTripId && !_selectedTrip) {
+      _selectedTrip = window._targetTripId;
+      window._targetTripId = null;
+    }
+
+    /* 頁面標題 + 返回 */
+    html += '<div class="card-header"><h3>費用收取</h3>';
+    html += '<button class="btn" onclick="FeesPage.backToRoom()">← 返回房務管理</button>';
+    html += '</div>';
 
     /* 選團 */
     html += '<div class="card" style="margin-bottom:16px;"><div class="card-body">';
@@ -3927,6 +3942,11 @@ var FeesPage = (function() {
     }
   }
 
+  function backToRoom() {
+    window._targetTripId = _selectedTrip;
+    Router.go('room');
+  }
+
   function escHtml(s) {
     if (!s) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -3940,6 +3960,7 @@ var FeesPage = (function() {
     sortByCol: sortByCol,
     updateCharge: updateCharge,
     editBooking: editBooking,
+    backToRoom: backToRoom,
   };
 })();
 
@@ -3968,7 +3989,16 @@ var ProfitPage = (function() {
     var trips = Trips.getAll().filter(function(t) { return t.status !== TRIP_STATUS.SEALED; });
 
     var html = '';
-    html += '<div class="card-header"><h3>利潤結算</h3></div>';
+
+    /* 自動接收來自房務管理的團 */
+    if (window._targetTripId && !_selectedTrip) {
+      _selectedTrip = window._targetTripId;
+      window._targetTripId = null;
+    }
+
+    html += '<div class="card-header"><h3>利潤結算</h3>';
+    html += '<button class="btn" onclick="ProfitPage.backToRoom()">← 返回房務管理</button>';
+    html += '</div>';
 
     /* 選團 */
     html += '<div class="card" style="margin-bottom:16px;"><div class="card-body">';
@@ -4203,6 +4233,11 @@ var ProfitPage = (function() {
     });
   }
 
+  function backToRoom() {
+    window._targetTripId = _selectedTrip;
+    Router.go('room');
+  }
+
   function escHtml(s) {
     if (!s) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -4219,6 +4254,7 @@ var ProfitPage = (function() {
     toggleAll: toggleAll,
     batchArchive: batchArchive,
     archiveOne: archiveOne,
+    backToRoom: backToRoom,
   };
 })();
 
