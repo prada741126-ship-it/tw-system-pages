@@ -3272,8 +3272,8 @@ var RoomPage = (function() {
       html += '<th>房型</th>';
       html += sortTH('入住', 'checkIn');
       html += sortTH('退房', 'checkOut');
-      html += '<th>晚</th>';
-      html += '<th>門檻</th>';
+      html += '<th class="num">晚</th>';
+      html += '<th class="num">門檻</th>';
       html += '<th>狀態</th>';
       html += '<th>確認號</th>';
       html += '<th>費用</th>';
