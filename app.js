@@ -3219,6 +3219,15 @@ var RoomPage = (function() {
     html += kpiCard('收費房', paidCount, 'warning', ICONS.paid);
     html += '</div>';
 
+    /* === 費用公式提示（僅展開面板時顯示）=== */
+    if (_selectedTrip && _showFeePanel) {
+      var settings = Settings.load ? Settings.load() : {};
+      var _roomFeeRate = (settings && settings.roomFeeRate) || 150;
+      html += '<div style="padding:8px 12px;font-size:var(--font-size-sm);color:var(--text-secondary);background:var(--bg-tertiary);border-radius:var(--radius);margin-bottom:12px;">';
+      html += '折抵天數 = floor(會員洗碼 \u00F7 每晚門檻) | 剩餘天數 = 房晚 \u2212 折抵 | 客收 = (剩餘 \u00D7 門檻 \u00F7 10萬) \u00D7 ' + _roomFeeRate + ' 元';
+      html += '</div>';
+    }
+
     /* === 狀態分佈 + 費用圓環 === */
     html += '<div class="rm-chart-row">';
     html += buildStatusCard(statusCounts, displayBookings.length);
@@ -3737,10 +3746,7 @@ var RoomPage = (function() {
     html += '<div class="kpi-card kpi-highlight"><div class="kpi-body"><div class="kpi-value">$' + kpi.totalCharge.toLocaleString() + '</div><div class="kpi-label">客收合計</div></div></div>';
     html += '</div>';
 
-    /* Formula hint */
-    html += '<div style="padding:8px 12px;font-size:var(--font-size-sm);color:var(--text-secondary);background:var(--bg-tertiary);">';
-    html += '折抵天數 = floor(會員洗碼 \u00F7 每晚門檻) | 剩餘天數 = 房晚 \u2212 折抵 | 客收 = (剩餘 \u00D7 門檻 \u00F7 10萬) \u00D7 ' + roomFeeRate + ' 元';
-    html += '</div>';
+    /* Formula hint — 已移至主頁面 KPI 下方 */
 
     /* Table */
     if (rows.length === 0) {
