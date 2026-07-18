@@ -422,11 +422,12 @@ var Router = (function() {
 
   function go(pageName) {
     var page = PAGES.find(function(p) { return p.name === pageName; });
-    if (!page) { console.error('[Router] unknown page: ' + pageName); return; }
+    var pageId = page ? page.id : 'page-' + pageName;
+
     _current = pageName;
 
     document.querySelectorAll('.page-section').forEach(function(el) { el.classList.remove('active'); });
-    var target = document.getElementById(page.id);
+    var target = document.getElementById(pageId);
     if (target) target.classList.add('active');
 
     document.querySelectorAll('.nav-item').forEach(function(el) { el.classList.remove('active'); });
