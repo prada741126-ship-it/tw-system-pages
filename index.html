@@ -817,10 +817,24 @@ a { color: var(--accent); text-decoration: none; }
 .data-table th.num,
 .data-table td.num { text-align: right; }
 
-/* ===== 狀態分佈 — 緊湊版（單欄，去除費用圓環後獨佔） ===== */
-.rm-chart-row { display: grid; grid-template-columns: 1fr; gap: var(--spacing-sm); margin-bottom: var(--spacing-sm); max-width: 480px; }
-.rm-chart-card { background: var(--bg-secondary); border-radius: var(--radius); padding: var(--spacing-sm); box-shadow: var(--shadow-sm); border: 1px solid var(--border); }
-.rm-chart-title { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); margin-bottom: var(--spacing-sm); }
+/* ===== 狀態分佈 + 代理折抵（雙欄佈局）===== */
+.rm-chart-row { display: grid; gap: var(--spacing-sm); margin-bottom: var(--spacing-sm); align-items: start; }
+.rm-chart-row--single { grid-template-columns: 1fr; max-width: 480px; }
+.rm-chart-row--double { grid-template-columns: 280px 1fr; }
+.rm-chart-card { background: var(--bg-secondary); border-radius: var(--radius); padding: var(--spacing-sm); box-shadow: var(--shadow-sm); border: 1px solid var(--border); min-width: 0; }
+.rm-chart-title { font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+
+/* 狀態分布 — 更緊湊 */
+.rm-chart-row .rm-dist-row { margin-bottom: 6px; }
+.rm-chart-row .rm-dist-label { font-size: 12px; }
+.rm-chart-row .rm-dist-count { font-size: 12px; }
+.rm-chart-row .rm-dist-bar { height: 4px; }
+
+/* 代理折抵在右側 */
+.rm-chart-row .rm-quota-table { font-size: var(--font-size-sm); }
+.rm-chart-row .rm-quota-table th,
+.rm-chart-row .rm-quota-table td { padding: 6px 8px; }
+.rm-chart-row .rm-quota-table th { font-size: 12px; }
 
 /* ===== 狀態分佈 ===== */
 .rm-dist-row { margin-bottom: var(--spacing-sm); }
@@ -876,7 +890,7 @@ a { color: var(--accent); text-decoration: none; }
 /* ===== 響應式 ===== */
 @media (max-width: 768px) {
   .rm-booking-form { min-width: auto; }
-  .rm-chart-row { grid-template-columns: 1fr; }
+  .rm-chart-row--double { grid-template-columns: 1fr; }
   .rm-donut-wrap { flex-direction: column; }
   .rm-fee-cards { grid-template-columns: 1fr; }
 }
@@ -1332,6 +1346,6 @@ a { color: var(--accent); text-decoration: none; }
 <!-- Toast -->
 <div id="toast-container" class="toast-container"></div>
 
-<script src="app.js?v=1784400370333"></script>
+<script src="app.js?v=1784400991043"></script>
 </body>
 </html>

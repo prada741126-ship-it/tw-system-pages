@@ -3192,6 +3192,11 @@ var RoomPage = (function() {
       if (statusCounts[b.status] !== undefined) statusCounts[b.status]++;
     });
 
+    /* 計算代理折抵所需數據（提前，供雙欄佈局使用） */
+    var tripBookings = _selectedTrip ? Bookings.getByTrip(_selectedTrip) : [];
+    var mtxs = _selectedTrip ? MemberTxs.getByTrip(_selectedTrip) : [];
+    var agentIds = new Set(tripBookings.map(function(b) { return b.agentId; }));
+
     var html = '';
 
     /* === 頁面標頭 === */
@@ -3233,9 +3238,13 @@ var RoomPage = (function() {
       html += '</div>';
     }
 
-    /* === 狀態分佈（緊湊單欄，去除費用圓環） === */
-    html += '<div class="rm-chart-row">';
+    /* === 狀態分佈 + 代理折抵（雙欄）=== */
+    var chartRowClass = (_selectedTrip && agentIds.size > 0) ? 'rm-chart-row rm-chart-row--double' : 'rm-chart-row rm-chart-row--single';
+    html += '<div class="' + chartRowClass + '">';
     html += buildStatusCard(statusCounts, displayBookings.length);
+    if (_selectedTrip && agentIds.size > 0) {
+      html += buildAgentQuotaCard(mtxs, tripBookings, agentIds);
+    }
     html += '</div>';
 
     /* === 快速篩選 === */
@@ -3332,39 +3341,6 @@ var RoomPage = (function() {
       html += '</div></div>';
     }
 
-    /* === 代理級折抵摘要 === */
-    if (_selectedTrip) {
-      var tripBookings = Bookings.getByTrip(_selectedTrip);
-      var mtxs = MemberTxs.getByTrip(_selectedTrip);
-      var agentIds = new Set(tripBookings.map(function(b) { return b.agentId; }));
-      if (agentIds.size > 0) {
-        html += '<div class="rm-quota-card">';
-        html += '<div class="card-header"><h4>代理級折抵</h4></div>';
-        html += '<table class="data-table rm-quota-table"><thead><tr>';
-        html += '<th>代理</th><th>總洗碼(萬)</th><th>總門檻</th><th>達標</th><th>配額</th>';
-        html += '</tr></thead><tbody>';
-        agentIds.forEach(function(aid) {
-          var quota = calcAgentQuota(aid, mtxs, tripBookings);
-          var agent = Agents.getById(aid);
-          var pct = quota.totalThreshold > 0 ? Math.min(100, (quota.totalWashRaw / quota.totalThreshold) * 100) : 0;
-          html += '<tr>';
-          html += '<td>' + (agent ? agent.name : aid) + '</td>';
-          html += '<td>' + quota.totalWashCode.toFixed(0) + '</td>';
-          html += '<td>' + (quota.totalThreshold / 10000).toFixed(0) + '萬</td>';
-          html += '<td>' + (quota.isMet ? '<span style="color:var(--success);font-weight:700;">✅ 達標</span>' : '<span style="color:var(--danger);font-weight:700;">未達標</span>') + '</td>';
-          var barColor = quota.isMet ? 'var(--success)' : 'var(--danger)';
-          html += '<td>';
-          html += '<div style="display:flex;align-items:center;gap:10px;min-width:180px;">';
-          html += '<div class="quota-bar" style="flex:1;"><div class="quota-fill" style="width:' + pct + '%;background:' + barColor + ';"></div></div>';
-          html += '<span style="font-size:var(--font-size-sm);white-space:nowrap;">' + quota.totalWashCode.toFixed(0) + '萬 / ' + (quota.totalThreshold/10000).toFixed(0) + '萬</span>';
-          html += '</div>';
-          html += '</td>';
-          html += '</tr>';
-        });
-        html += '</tbody></table></div>';
-      }
-    }
-
     /* === 費用收取面板（方案B：表格下方面板展開） === */
     if (_showFeePanel && _selectedTrip) {
       html += renderFeePanel();
@@ -3440,6 +3416,35 @@ var RoomPage = (function() {
       html += '</div>';
     }
     html += '</div>';
+    return html;
+  }
+
+  /* ===== Helper: 代理折抵卡片（供雙欄佈局右側使用） ===== */
+  function buildAgentQuotaCard(mtxs, tripBookings, agentIds) {
+    var html = '<div class="rm-chart-card">';
+    html += '<h4 class="rm-chart-title">代理級折抵</h4>';
+    html += '<table class="data-table rm-quota-table"><thead><tr>';
+    html += '<th>代理</th><th class="num">總洗碼(萬)</th><th class="num">總門檻</th><th>達標</th><th>配額</th>';
+    html += '</tr></thead><tbody>';
+    agentIds.forEach(function(aid) {
+      var quota = calcAgentQuota(aid, mtxs, tripBookings);
+      var agent = Agents.getById(aid);
+      var pct = quota.totalThreshold > 0 ? Math.min(100, (quota.totalWashRaw / quota.totalThreshold) * 100) : 0;
+      html += '<tr>';
+      html += '<td>' + (agent ? agent.name : aid) + '</td>';
+      html += '<td class="num">' + quota.totalWashCode.toFixed(0) + '</td>';
+      html += '<td class="num">' + (quota.totalThreshold / 10000).toFixed(0) + '萬</td>';
+      html += '<td>' + (quota.isMet ? '<span style="color:var(--success);font-weight:700;">✅ 達標</span>' : '<span style="color:var(--danger);font-weight:700;">未達標</span>') + '</td>';
+      var barColor = quota.isMet ? 'var(--success)' : 'var(--danger)';
+      html += '<td>';
+      html += '<div style="display:flex;align-items:center;gap:10px;min-width:180px;">';
+      html += '<div class="quota-bar" style="flex:1;"><div class="quota-fill" style="width:' + pct + '%;background:' + barColor + ';"></div></div>';
+      html += '<span style="font-size:var(--font-size-sm);white-space:nowrap;">' + quota.totalWashCode.toFixed(0) + '萬 / ' + (quota.totalThreshold/10000).toFixed(0) + '萬</span>';
+      html += '</div>';
+      html += '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
     return html;
   }
 
