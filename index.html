@@ -855,11 +855,26 @@ a { color: var(--accent); text-decoration: none; }
 /* ===== 訂房 Modal 表單 ===== */
 .rm-booking-form { min-width: 450px; }
 
+/* ===== 費用收取面板 — 卡片版 ===== */
+.rm-fee-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; padding: 12px; }
+.rm-fee-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--bg-primary); display: flex; flex-direction: column; gap: 6px; transition: box-shadow var(--transition-fast); }
+.rm-fee-card:hover { box-shadow: var(--shadow-sm); }
+.rm-fee-card-top { display: flex; justify-content: space-between; align-items: center; }
+.rm-fee-card-guest { font-size: var(--font-size-lg); font-weight: 700; color: var(--text-primary); }
+.rm-fee-badge { display: inline-block; padding: 3px 10px; border-radius: var(--radius); color: var(--text-inverse); font-size: var(--font-size-sm); font-weight: 600; cursor: pointer; user-select: none; transition: opacity var(--transition-fast); }
+.rm-fee-badge:hover { opacity: 0.85; }
+.rm-fee-card-info { display: flex; gap: 12px; font-size: var(--font-size-sm); color: var(--text-secondary); }
+.rm-fee-card-hotel { font-size: var(--font-size-sm); color: var(--text-secondary); }
+.rm-fee-card-stats { display: flex; gap: 10px; flex-wrap: wrap; font-size: var(--font-size-sm); padding-top: 6px; border-top: 1px solid var(--border); color: var(--text-secondary); }
+.rm-fee-card-stats b { color: var(--text-primary); }
+.rm-fee-card-amount { text-align: right; font-size: var(--font-size-lg); font-weight: 700; color: var(--text-primary); }
+
 /* ===== 響應式 ===== */
 @media (max-width: 768px) {
   .rm-booking-form { min-width: auto; }
   .rm-chart-row { grid-template-columns: 1fr; }
   .rm-donut-wrap { flex-direction: column; }
+  .rm-fee-cards { grid-template-columns: 1fr; }
 }
 
 /**
@@ -1313,6 +1328,6 @@ a { color: var(--accent); text-decoration: none; }
 <!-- Toast -->
 <div id="toast-container" class="toast-container"></div>
 
-<script src="app.js?v=1784367467915"></script>
+<script src="app.js?v=1784379611133"></script>
 </body>
 </html>
