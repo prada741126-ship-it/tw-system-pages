@@ -3335,14 +3335,14 @@ var RoomPage = (function() {
           var pct = quota.totalThreshold > 0 ? Math.min(100, (quota.totalWashRaw / quota.totalThreshold) * 100) : 0;
           html += '<tr>';
           html += '<td>' + (agent ? agent.name : aid) + '</td>';
-          html += '<td>' + quota.totalWashCode.toFixed(2) + '</td>';
+          html += '<td>' + quota.totalWashCode.toFixed(0) + '</td>';
           html += '<td>' + (quota.totalThreshold / 10000).toFixed(0) + '萬</td>';
           html += '<td>' + (quota.isMet ? '<span style="color:var(--success);font-weight:700;">✅ 達標</span>' : '<span style="color:var(--danger);font-weight:700;">未達標</span>') + '</td>';
           var barColor = quota.isMet ? 'var(--success)' : 'var(--danger)';
           html += '<td>';
           html += '<div style="display:flex;align-items:center;gap:10px;min-width:180px;">';
           html += '<div class="quota-bar" style="flex:1;"><div class="quota-fill" style="width:' + pct + '%;background:' + barColor + ';"></div></div>';
-          html += '<span style="font-size:var(--font-size-sm);white-space:nowrap;">' + quota.totalWashCode.toFixed(2) + '萬 / ' + (quota.totalThreshold/10000).toFixed(0) + '萬</span>';
+          html += '<span style="font-size:var(--font-size-sm);white-space:nowrap;">' + quota.totalWashCode.toFixed(0) + '萬 / ' + (quota.totalThreshold/10000).toFixed(0) + '萬</span>';
           html += '</div>';
           html += '</td>';
           html += '</tr>';
@@ -3832,12 +3832,11 @@ var FeesPage = (function() {
         html += '<td class="num">' + memWashWan + '</td>';
         html += '<td class="num">' + (d.discount > 0 ? d.discount : '<span style="color:var(--text-muted);">0</span>') + '</td>';
         html += '<td class="num">' + (d.remaining <= 0 ? '<span style="color:var(--success);font-weight:700;">達標</span>' : '<span style="color:var(--danger);font-weight:700;">' + d.remaining + '</span>') + '</td>';
+        var ft = b.feeType || 'auto';
+        var ftLabel = { auto: '自動', free: '免費', paid: '收費' }[ft] || '自動';
+        var ftColor = { auto: 'var(--info)', free: 'var(--success)', paid: 'var(--danger)' }[ft] || 'var(--info)';
         html += '<td>';
-        html += '<select onchange="FeesPage.updateFeeType(\'' + b.id + '\', this.value)" style="font-size:var(--font-size-sm);padding:2px 4px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-primary);color:var(--text-primary);cursor:pointer;">';
-        html += '<option value="auto"' + (b.feeType === 'auto' || !b.feeType ? ' selected' : '') + '>自動</option>';
-        html += '<option value="free"' + (b.feeType === 'free' ? ' selected' : '') + '>免費</option>';
-        html += '<option value="paid"' + (b.feeType === 'paid' ? ' selected' : '') + '>收費</option>';
-        html += '</select>';
+        html += '<span class="badge" style="background:' + ftColor + ';color:#fff;cursor:pointer;user-select:none;" onclick="FeesPage.toggleFeeType(\'' + b.id + '\')" title="點擊切換費用類型">' + ftLabel + '</span>';
         html += '</td>';
         html += '<td class="num"><input type="number" min="0" value="' + (b.chargeGuest || d.charge || 0) + '" onchange="FeesPage.updateCharge(\'' + b.id + '\', this.value)" style="width:70px;text-align:right;padding:2px 4px;font-size:var(--font-size-sm);border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-primary);color:var(--text-primary);"></td>';
         html += '<td><button class="btn-sm" onclick="FeesPage.editBooking(\'' + b.id + '\')">編輯</button></td>';
@@ -3943,9 +3942,13 @@ var FeesPage = (function() {
     Toast.success('向客人收已更新');
   }
 
-  function updateFeeType(bookingId, feeType) {
-    Bookings.update(bookingId, { feeType: feeType });
-    Toast.success('費用類型已更新');
+  function toggleFeeType(bookingId) {
+    var booking = Bookings.getById(bookingId);
+    var current = booking && booking.feeType ? booking.feeType : 'auto';
+    /* 三態循環: auto → free → paid → auto */
+    var next = { auto: 'free', free: 'paid', paid: 'auto' }[current] || 'auto';
+    Bookings.update(bookingId, { feeType: next });
+    Toast.success('費用類型: ' + ({ auto: '自動', free: '免費', paid: '收費' }[next]) + '');
     render();
   }
 
@@ -3974,7 +3977,7 @@ var FeesPage = (function() {
     onSearch: onSearch,
     sortByCol: sortByCol,
     updateCharge: updateCharge,
-    updateFeeType: updateFeeType,
+    toggleFeeType: toggleFeeType,
     editBooking: editBooking,
     backToRoom: backToRoom,
   };
