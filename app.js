@@ -3154,6 +3154,7 @@ var RoomPage = (function() {
   var _filterFee = '';
   var _searchTimer = null;
   var PAGE_SIZE = 10;
+  var _showFeePanel = false;
   var STATUS_LABELS = {
     'pending': '待確認', 'confirmed': '已確認', 'checked-in': '已入住',
     'checked-out': '已退房', 'cancelled': '已取消'
@@ -3205,7 +3206,7 @@ var RoomPage = (function() {
     html += '</select>';
     if (_selectedTrip) {
       html += '<button class="btn btn-primary" onclick="RoomPage.showAddBooking()">+ 新增訂房</button>';
-      html += '<button class="btn" style="background:var(--accent);color:#fff;" onclick="RoomPage.goFees()">費用收取</button>';
+      html += '<button class="btn" style="background:var(--accent);color:#fff;" onclick="RoomPage.toggleFeePanel()">' + (_showFeePanel ? '收起費用' : '費用收取') + '</button>';
       html += '<button class="btn" style="background:var(--success);color:#fff;" onclick="RoomPage.goProfit()">利潤結算</button>';
     }
     html += '</div></div>';
@@ -3349,6 +3350,11 @@ var RoomPage = (function() {
         });
         html += '</tbody></table></div>';
       }
+    }
+
+    /* === 費用收取面板（方案B：表格下方面板展開） === */
+    if (_showFeePanel && _selectedTrip) {
+      html += renderFeePanel();
     }
 
     html += '</div>';
@@ -3630,12 +3636,214 @@ var RoomPage = (function() {
     });
   }
 
+  /* ===== 費用收取面板（方案B） ===== */
+  function toggleFeePanel() { _showFeePanel = !_showFeePanel; render(); }
+
+  function cycleFeeType(bookingId) {
+    var b = Bookings.getById(bookingId);
+    if (!b) return;
+    var current = b.feeType || 'auto';
+    var next;
+    if (current === 'auto') next = 'free';
+    else if (current === 'free') next = 'paid';
+    else next = 'auto';
+
+    var update = { feeType: next, feeManualOverride: true };
+
+    if (next === 'paid') {
+      /* 計算應收金額 */
+      var settings = Settings.load();
+      var roomFeeRate = settings.roomFeeRate || 150;
+      var th = b.threshold || 0;
+      var n = b.nights || 1;
+      var mtxs = MemberTxs.getByTrip(_selectedTrip);
+      var mw = {};
+      mtxs.forEach(function(tx) { mw[tx.memberId] = (mw[tx.memberId] || 0) + (tx.washCode || 0); });
+      var memWashRaw = (b.memberId && mw[b.memberId]) ? mw[b.memberId] * 10000 : 0;
+      var discount = Math.floor(th > 0 ? memWashRaw / th : 0);
+      var remaining = n - discount;
+      if (remaining > 0 && th > 0) {
+        update.chargeGuest = Math.round((remaining * th / 100000) * roomFeeRate);
+      }
+    } else {
+      update.chargeGuest = 0;
+    }
+
+    Bookings.update(bookingId, update);
+    Toast.success('已切換為' + (next === 'auto' ? '自動' : next === 'free' ? '免費' : '收費'));
+    render();
+  }
+
+  function renderFeePanel() {
+    var settings = Settings.load();
+    var roomFeeRate = settings.roomFeeRate || 150;
+    var tripBookings = Bookings.getByTrip(_selectedTrip);
+    var mtxs = MemberTxs.getByTrip(_selectedTrip);
+
+    /* 會員洗碼彙總 */
+    var memberWash = {};
+    mtxs.forEach(function(tx) {
+      memberWash[tx.memberId] = (memberWash[tx.memberId] || 0) + (tx.washCode || 0);
+    });
+
+    /* 計算每筆訂房費用 */
+    var rows = [];
+    var kpi = { totalNights: 0, totalTh: 0, totalDiscount: 0, totalRemaining: 0, freeCount: 0, paidCount: 0, totalCharge: 0 };
+
+    tripBookings.forEach(function(b) {
+      var th = b.threshold || 0;
+      var n = b.nights || 1;
+      var memWashRaw = (b.memberId && memberWash[b.memberId]) ? memberWash[b.memberId] * 10000 : 0;
+      var discount = Math.floor(th > 0 ? memWashRaw / th : 0);
+      var remaining = n - discount;
+      var isPaid = false;
+      if (b.feeType === FEE_TYPE.PAID) { isPaid = true; }
+      else if (b.feeType === FEE_TYPE.FREE) { isPaid = false; }
+      else { isPaid = remaining > 0; }
+      var charge = 0;
+      if (isPaid && remaining > 0 && th > 0) {
+        charge = Math.round((remaining * th / 100000) * roomFeeRate);
+      }
+      if (b.chargeGuest && b.chargeGuest > 0) charge = b.chargeGuest;
+      if (!isPaid) charge = 0;
+
+      kpi.totalNights += n;
+      kpi.totalTh += th * n;
+      kpi.totalDiscount += discount;
+      kpi.totalRemaining += remaining;
+      if (isPaid) { kpi.paidCount++; kpi.totalCharge += charge; }
+      else { kpi.freeCount++; }
+
+      rows.push({ b: b, th: th, n: n, memWash: (b.memberId && memberWash[b.memberId]) ? memberWash[b.memberId] : 0, discount: discount, remaining: remaining, isPaid: isPaid, charge: charge });
+    });
+
+    var html = '';
+    html += '<div class="rm-fee-panel" style="margin-top:16px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">';
+
+    /* Panel header */
+    html += '<div class="card-header" style="background:var(--bg-secondary);">';
+    html += '<h4>費用收取明細</h4>';
+    html += '<button class="btn-sm" onclick="RoomPage.toggleFeePanel()">收起</button>';
+    html += '</div>';
+
+    /* KPI cards */
+    html += '<div class="kpi-grid" style="padding:12px;">';
+    html += '<div class="kpi-card kpi-active"><div class="kpi-body"><div class="kpi-value">' + kpi.totalNights + '</div><div class="kpi-label">總房晚</div></div></div>';
+    html += '<div class="kpi-card kpi-highlight"><div class="kpi-body"><div class="kpi-value">' + (kpi.totalTh / 10000).toFixed(0) + '萬</div><div class="kpi-label">總門檻</div></div></div>';
+    html += '<div class="kpi-card kpi-normal"><div class="kpi-body"><div class="kpi-value">' + kpi.totalDiscount + '</div><div class="kpi-label">總折抵(天)</div></div></div>';
+    html += '<div class="kpi-card kpi-warning"><div class="kpi-body"><div class="kpi-value">' + kpi.totalRemaining + '</div><div class="kpi-label">總剩餘(天)</div></div></div>';
+    html += '<div class="kpi-card kpi-normal"><div class="kpi-body"><div class="kpi-value">' + kpi.freeCount + '</div><div class="kpi-label">免費房</div></div></div>';
+    html += '<div class="kpi-card kpi-warning"><div class="kpi-body"><div class="kpi-value">' + kpi.paidCount + '</div><div class="kpi-label">收費房</div></div></div>';
+    html += '<div class="kpi-card kpi-highlight"><div class="kpi-body"><div class="kpi-value">$' + kpi.totalCharge.toLocaleString() + '</div><div class="kpi-label">客收合計</div></div></div>';
+    html += '</div>';
+
+    /* Formula hint */
+    html += '<div style="padding:8px 12px;font-size:var(--font-size-sm);color:var(--text-secondary);background:var(--bg-tertiary);">';
+    html += '折抵天數 = floor(會員洗碼 \u00F7 每晚門檻) | 剩餘天數 = 房晚 \u2212 折抵 | 客收 = (剩餘 \u00D7 門檻 \u00F7 10萬) \u00D7 ' + roomFeeRate + ' 元';
+    html += '</div>';
+
+    /* Table */
+    if (rows.length === 0) {
+      html += '<div class="empty-state" style="padding:24px;">此團無訂房</div>';
+    } else {
+      html += '<div class="table-wrapper"><table class="data-table rm-table"><thead><tr>';
+      html += '<th>客人</th>';
+      html += '<th>會員</th>';
+      html += '<th>代理</th>';
+      html += '<th>酒店</th>';
+      html += '<th>房型</th>';
+      html += '<th class="num">晚</th>';
+      html += '<th class="num">門檻(萬)</th>';
+      html += '<th class="num">洗碼(萬)</th>';
+      html += '<th class="num">折抵</th>';
+      html += '<th class="num">剩餘</th>';
+      html += '<th>費用 / 金額</th>';
+      html += '</tr></thead><tbody>';
+
+      rows.forEach(function(r) {
+        var b = r.b;
+        var agent = Agents.getById(b.agentId);
+        var member = Members.getById(b.memberId);
+        html += '<tr>';
+        html += '<td style="font-weight:600;">' + escHtml(b.guestName || '') + '</td>';
+        html += '<td>' + (member ? escHtml(member.name) : '<span class="text-muted">-</span>') + '</td>';
+        html += '<td>' + (agent ? agent.name : '') + '</td>';
+        html += '<td>' + escHtml(b.hotel || '') + '</td>';
+        html += '<td>' + escHtml(b.roomType || '') + '</td>';
+        html += '<td class="num">' + r.n + '</td>';
+        html += '<td class="num">' + (r.th / 10000).toFixed(0) + '</td>';
+        html += '<td class="num">' + (r.memWash > 0 ? r.memWash.toFixed(0) : '-') + '</td>';
+        html += '<td class="num">' + (r.discount > 0 ? r.discount : '<span class="text-muted">0</span>') + '</td>';
+        html += '<td class="num">' + (r.remaining > 0 ? '<span style="color:var(--danger);font-weight:700;">' + r.remaining + '</span>' : '<span style="color:var(--success);font-weight:700;">0</span>') + '</td>';
+
+        /* Fee badge (clickable) + amount */
+        var feeType = b.feeType || 'auto';
+        var badgeColor, badgeText;
+        if (feeType === 'free') { badgeColor = 'var(--success)'; badgeText = '免費'; }
+        else if (feeType === 'paid') { badgeColor = 'var(--danger)'; badgeText = '收費'; }
+        else { badgeColor = 'var(--info)'; badgeText = '自動'; }
+
+        html += '<td style="white-space:nowrap;">';
+        html += '<span onclick="RoomPage.cycleFeeType(\'' + b.id + '\')" style="display:inline-block;padding:2px 8px;border-radius:var(--radius);background:' + badgeColor + ';color:#fff;font-size:var(--font-size-sm);cursor:pointer;user-select:none;">' + badgeText + '</span>';
+        if (r.isPaid && r.charge > 0) {
+          html += ' <span style="font-weight:600;color:var(--text-primary);">$' + r.charge.toLocaleString() + '</span>';
+        } else {
+          html += ' <span class="text-muted">- -</span>';
+        }
+        html += '</td>';
+        html += '</tr>';
+      });
+
+      html += '</tbody></table></div>';
+
+      /* Agent summary */
+      var agentSummary = {};
+      rows.forEach(function(r) {
+        var aid = r.b.agentId;
+        if (!agentSummary[aid]) agentSummary[aid] = { count: 0, nights: 0, th: 0, discount: 0, remaining: 0, free: 0, paid: 0, charge: 0 };
+        var s = agentSummary[aid];
+        s.count++;
+        s.nights += r.n;
+        s.th += r.th * r.n;
+        s.discount += r.discount;
+        s.remaining += r.remaining;
+        if (r.isPaid) { s.paid++; s.charge += r.charge; }
+        else { s.free++; }
+      });
+
+      html += '<div style="padding:12px;">';
+      html += '<table class="data-table"><thead><tr>';
+      html += '<th>代理</th><th class="num">訂房</th><th class="num">房晚</th><th class="num">門檻(萬)</th><th class="num">折抵</th><th class="num">剩餘</th><th class="num">免費</th><th class="num">收費</th><th class="num">客收</th>';
+      html += '</tr></thead><tbody>';
+      Object.keys(agentSummary).forEach(function(aid) {
+        var s = agentSummary[aid];
+        var ag = Agents.getById(aid);
+        html += '<tr>';
+        html += '<td>' + (ag ? ag.name : aid) + '</td>';
+        html += '<td class="num">' + s.count + '</td>';
+        html += '<td class="num">' + s.nights + '</td>';
+        html += '<td class="num">' + (s.th / 10000).toFixed(0) + '</td>';
+        html += '<td class="num">' + s.discount + '</td>';
+        html += '<td class="num">' + s.remaining + '</td>';
+        html += '<td class="num">' + s.free + '</td>';
+        html += '<td class="num">' + s.paid + '</td>';
+        html += '<td class="num">$' + s.charge.toLocaleString() + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
   return {
     render: render, selectTrip: selectTrip,
     showAddBooking: showAddBooking, onCasinoChange: onCasinoChange, onHotelChange: onHotelChange,
     saveBooking: saveBooking, editBooking: editBooking, saveEditBooking: saveEditBooking, delBooking: delBooking,
     goPage: goPage, onSearch: onSearch, sortByCol: sortByCol, setFeeFilter: setFeeFilter,
     goFees: goFees, goProfit: goProfit,
+    toggleFeePanel: toggleFeePanel, cycleFeeType: cycleFeeType,
   };
 })();
 
