@@ -3142,49 +3142,149 @@ var MemberPage = (function() {
 // === src/pages/room.js ===
 /**
  * pages/room.js — 房务管理页
- * 体系→酒店→房型三级联动 + 配额条 + 状态流转
+ * 体系→酒店→房型三级联动 + KPI + 状态分布 + 费用圆环 + 分页搜索排序表格 + 代理级折抵
  */
 var RoomPage = (function() {
   var _selectedTrip = null;
+  var _page = 1;
+  var _search = '';
+  var _sortField = 'checkIn';
+  var _sortAsc = false;
+  var _filterFee = '';
+  var _searchTimer = null;
+  var PAGE_SIZE = 10;
+
+  var ICONS = {
+    nights: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    threshold: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>',
+    free: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
+    paid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+  };
 
   function render() {
     var trips = Trips.getAll().filter(function(t) { return t.status !== TRIP_STATUS.SEALED; });
-    var bookings = Bookings.getAll();
+    var allBookings = Bookings.getAll();
+    var displayBookings = _selectedTrip ? allBookings.filter(function(b) { return b.tripId === _selectedTrip; }) : allBookings;
+
+    /* === KPI 計算 === */
+    var totalNights = 0;
+    var totalThreshold = 0;
+    var freeCount = 0;
+    var paidCount = 0;
+    var statusCounts = { 'pending': 0, 'confirmed': 0, 'checked-in': 0, 'checked-out': 0, 'cancelled': 0 };
+
+    displayBookings.forEach(function(b) {
+      var n = b.nights || 1;
+      totalNights += n;
+      totalThreshold += (b.threshold || 0) * n;
+      if (b.feeType === 'free') freeCount++;
+      if (b.feeType === 'paid') paidCount++;
+      if (statusCounts[b.status] !== undefined) statusCounts[b.status]++;
+    });
+
     var html = '';
 
+    /* === 頁面標頭 === */
     html += '<div class="card">';
     html += '<div class="card-header"><h3>房務管理</h3>';
+    html += '<div style="display:flex;gap:8px;align-items:center;">';
     html += '<select id="room-trip-select" class="form-input" style="width:auto;" onchange="RoomPage.selectTrip(this.value)">';
     html += '<option value="">全部訂房</option>';
     trips.forEach(function(trip) {
       var sh = Shareholders.getById(trip.shareholderId);
       html += '<option value="' + trip.id + '"' + (_selectedTrip === trip.id ? ' selected' : '') + '>' + trip.id + ' - ' + (sh ? sh.name : '') + '</option>';
     });
-    html += '</select></div>';
+    html += '</select>';
+    if (_selectedTrip) {
+      html += '<button class="btn btn-primary" onclick="RoomPage.showAddBooking()">+ 新增訂房</button>';
+    }
+    html += '</div></div>';
 
-    var displayBookings = _selectedTrip ? bookings.filter(function(b) { return b.tripId === _selectedTrip; }) : bookings;
+    /* === KPI 卡片 === */
+    html += '<div class="kpi-grid">';
+    html += kpiCard('總房晚數', totalNights, 'active', ICONS.nights);
+    html += kpiCard('總門檻(萬)', formatNum(totalThreshold / 10000), 'highlight', ICONS.threshold);
+    html += kpiCard('免費房', freeCount, 'normal', ICONS.free);
+    html += kpiCard('收費房', paidCount, 'warning', ICONS.paid);
+    html += '</div>';
 
-    if (displayBookings.length === 0) {
+    /* === 狀態分佈 + 費用圓環 === */
+    html += '<div class="rm-chart-row">';
+    html += buildStatusCard(statusCounts, displayBookings.length);
+    html += buildFeeDonut(freeCount, paidCount);
+    html += '</div>';
+
+    /* === 快速篩選 === */
+    html += '<div class="rm-quick-filters">';
+    html += filterBtn('全部', '', displayBookings.length);
+    html += filterBtn('免費', 'free', freeCount);
+    html += filterBtn('收費', 'paid', paidCount);
+    html += '</div>';
+
+    /* === 搜索欄 === */
+    html += '<div class="rm-search-bar">';
+    html += '<input type="text" id="rm-search-input" class="form-input" placeholder="搜索客人、代理、酒店..." value="' + escapeAttr(_search) + '" oninput="RoomPage.onSearch(this.value)">';
+    html += '</div>';
+
+    /* === 分頁表格 === */
+    var filtered = displayBookings;
+    if (_filterFee) {
+      filtered = filtered.filter(function(b) { return b.feeType === _filterFee; });
+    }
+    if (_search) {
+      var q = _search.toLowerCase();
+      filtered = filtered.filter(function(b) {
+        return (b.guestName || '').toLowerCase().indexOf(q) >= 0 ||
+               (b.hotel || '').toLowerCase().indexOf(q) >= 0 ||
+               (b.roomType || '').toLowerCase().indexOf(q) >= 0 ||
+               (b.agentId || '').toLowerCase().indexOf(q) >= 0;
+      });
+    }
+    /* 排序 */
+    var sorted = filtered.slice().sort(function(a, b) {
+      var av = a[_sortField] || '';
+      var bv = b[_sortField] || '';
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return _sortAsc ? av - bv : bv - av;
+      }
+      return _sortAsc ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+    });
+
+    var totalPages = Math.ceil(sorted.length / PAGE_SIZE) || 1;
+    if (_page > totalPages) _page = totalPages;
+    var startIdx = (_page - 1) * PAGE_SIZE;
+    var pageItems = sorted.slice(startIdx, startIdx + PAGE_SIZE);
+
+    if (pageItems.length === 0) {
       html += '<div class="empty-state">無訂房記錄</div>';
     } else {
-      html += '<table class="data-table"><thead><tr>';
-      html += '<th>客人</th><th>代理</th><th>酒店</th><th>房型</th>';
-      html += '<th>入住</th><th>退房</th><th>晚數</th><th>門檻</th>';
-      html += '<th>狀態</th><th>確認號</th><th>費用</th><th>操作</th>';
+      html += '<div class="table-wrapper"><table class="data-table rm-table"><thead><tr>';
+      html += sortTH('客人', 'guestName');
+      html += '<th>代理</th>';
+      html += sortTH('酒店', 'hotel');
+      html += '<th>房型</th>';
+      html += sortTH('入住', 'checkIn');
+      html += sortTH('退房', 'checkOut');
+      html += '<th>晚</th>';
+      html += '<th>門檻</th>';
+      html += '<th>狀態</th>';
+      html += '<th>確認號</th>';
+      html += '<th>費用</th>';
+      html += '<th>操作</th>';
       html += '</tr></thead><tbody>';
-      displayBookings.forEach(function(b) {
+      pageItems.forEach(function(b) {
         var agent = Agents.getById(b.agentId);
         html += '<tr>';
-        html += '<td>' + (b.guestName || '') + '</td>';
-        html += '<td>' + (agent ? agent.name : b.agentId) + '</td>';
-        html += '<td>' + (b.hotel || '') + '</td>';
-        html += '<td>' + (b.roomType || '') + '</td>';
+        html += '<td style="font-weight:600;">' + escHtml(b.guestName || '') + '</td>';
+        html += '<td>' + (agent ? agent.name : b.agentId || '') + '</td>';
+        html += '<td>' + escHtml(b.hotel || '') + '</td>';
+        html += '<td>' + escHtml(b.roomType || '') + '</td>';
         html += '<td>' + (b.checkIn || '') + '</td>';
         html += '<td>' + (b.checkOut || '') + '</td>';
-        html += '<td>' + (b.nights || 1) + '</td>';
-        html += '<td>' + ((b.threshold || 0) / 10000).toFixed(0) + '萬</td>';
+        html += '<td class="num">' + (b.nights || 1) + '</td>';
+        html += '<td class="num">' + ((b.threshold || 0) / 10000).toFixed(0) + '萬</td>';
         html += '<td>' + statusBadge(b.status) + '</td>';
-        html += '<td>' + (b.confirmNo || '') + '</td>';
+        html += '<td>' + escHtml(b.confirmNo || '') + '</td>';
         html += '<td>' + feeBadge(b) + '</td>';
         html += '<td>';
         html += '<button class="btn-sm" onclick="RoomPage.editBooking(\'' + b.id + '\')">編輯</button> ';
@@ -3192,18 +3292,28 @@ var RoomPage = (function() {
         html += '</td>';
         html += '</tr>';
       });
-      html += '</tbody></table>';
+      html += '</tbody></table></div>';
+
+      /* 分頁控制 */
+      html += '<div class="paginator">';
+      html += '<span class="paginator-info">第 ' + _page + '/' + totalPages + ' 頁，共 ' + sorted.length + ' 筆</span>';
+      html += '<div class="paginator-btns">';
+      html += '<button class="btn-sm" onclick="RoomPage.goPage(1)" ' + (_page === 1 ? 'disabled' : '') + '>首頁</button> ';
+      html += '<button class="btn-sm" onclick="RoomPage.goPage(' + (_page - 1) + ')" ' + (_page === 1 ? 'disabled' : '') + '>上一頁</button> ';
+      html += '<button class="btn-sm" onclick="RoomPage.goPage(' + (_page + 1) + ')" ' + (_page >= totalPages ? 'disabled' : '') + '>下一頁</button> ';
+      html += '<button class="btn-sm" onclick="RoomPage.goPage(' + totalPages + ')" ' + (_page >= totalPages ? 'disabled' : '') + '>末頁</button>';
+      html += '</div></div>';
     }
 
-    // 代理级折抵摘要
+    /* === 代理級折抵摘要 === */
     if (_selectedTrip) {
       var tripBookings = Bookings.getByTrip(_selectedTrip);
       var mtxs = MemberTxs.getByTrip(_selectedTrip);
       var agentIds = new Set(tripBookings.map(function(b) { return b.agentId; }));
       if (agentIds.size > 0) {
-        html += '<div class="card" style="margin-top:16px;">';
+        html += '<div class="rm-quota-card">';
         html += '<div class="card-header"><h4>代理級折抵</h4></div>';
-        html += '<table class="data-table"><thead><tr>';
+        html += '<table class="data-table rm-quota-table"><thead><tr>';
         html += '<th>代理</th><th>總洗碼(萬)</th><th>總門檻</th><th>達標</th><th>配額</th>';
         html += '</tr></thead><tbody>';
         agentIds.forEach(function(aid) {
@@ -3222,15 +3332,115 @@ var RoomPage = (function() {
       }
     }
 
-    if (_selectedTrip) {
-      html += '<button class="btn btn-primary" style="margin-top:12px;" onclick="RoomPage.showAddBooking()">+ 新增訂房</button>';
-    }
-
     html += '</div>';
     var container = document.getElementById('page-room');
     if (container) container.innerHTML = html;
+
+    /* 搜索框重新焦焦點 */
+    if (_search && document.getElementById('rm-search-input')) {
+      var inp = document.getElementById('rm-search-input');
+      inp.focus();
+      inp.setSelectionRange(inp.value.length, inp.value.length);
+    }
   }
 
+  /* ===== Helper: KPI 卡片 ===== */
+  function kpiCard(label, value, type, iconSvg) {
+    return '<div class="kpi-card kpi-' + type + '"><div class="kpi-icon">' + iconSvg + '</div><div class="kpi-body"><div class="kpi-value">' + value + '</div><div class="kpi-label">' + label + '</div></div></div>';
+  }
+
+  /* ===== Helper: 可排序表頭 ===== */
+  function sortTH(label, field) {
+    var arrow = _sortField === field ? (_sortAsc ? ' \u2191' : ' \u2193') : '';
+    return '<th style="cursor:pointer;" onclick="RoomPage.sortByCol(\'' + field + '\')">' + label + arrow + '</th>';
+  }
+
+  /* ===== Helper: 狀態分佈卡片 ===== */
+  function buildStatusCard(statusCounts, total) {
+    var rows = [
+      { label: '待確認', key: 'pending',       color: 'var(--warning)' },
+      { label: '已確認', key: 'confirmed',     color: 'var(--info)' },
+      { label: '已入住', key: 'checked-in',    color: 'var(--accent)' },
+      { label: '已退房', key: 'checked-out',   color: 'var(--success)' },
+      { label: '已取消', key: 'cancelled',     color: 'var(--danger)' },
+    ];
+    var html = '<div class="rm-chart-card">';
+    html += '<h4 class="rm-chart-title">狀態分佈</h4>';
+    rows.forEach(function(r) {
+      var count = statusCounts[r.key] || 0;
+      var pct = total > 0 ? (count / total * 100) : 0;
+      html += '<div class="rm-dist-row">';
+      html += '<div class="rm-dist-info">';
+      html += '<span class="rm-dist-label"><span class="rm-dist-dot" style="background:' + r.color + ';"></span>' + r.label + '</span>';
+      html += '<span class="rm-dist-count">' + count + ' <span class="rm-dist-pct">(' + pct.toFixed(0) + '%)</span></span>';
+      html += '</div>';
+      html += '<div class="rm-dist-bar"><div class="rm-dist-fill" style="width:' + pct.toFixed(1) + '%;background:' + r.color + ';"></div></div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  /* ===== Helper: 費用圓環卡片 ===== */
+  function buildFeeDonut(freeCount, paidCount) {
+    var total = freeCount + paidCount;
+    var html = '<div class="rm-chart-card">';
+    html += '<h4 class="rm-chart-title">費用分佈</h4>';
+    if (total === 0) {
+      html += '<div class="empty-state" style="padding:24px 0;">暫無數據</div>';
+    } else {
+      var freePct = (freeCount / total * 100).toFixed(1);
+      var paidPct = (paidCount / total * 100).toFixed(1);
+      html += '<div class="rm-donut-wrap">';
+      html += '<div class="rm-donut" style="background:conic-gradient(var(--success) 0% ' + freePct + '%, var(--warning) ' + freePct + '% 100%);">';
+      html += '<div class="rm-donut-center"><span class="rm-donut-num">' + total + '</span><span class="rm-donut-label">總房數</span></div>';
+      html += '</div>';
+      html += '<div class="rm-donut-legend">';
+      html += '<div class="rm-legend-item"><span class="rm-legend-dot" style="background:var(--success);"></span><span>免費房 ' + freeCount + ' (' + freePct + '%)</span></div>';
+      html += '<div class="rm-legend-item"><span class="rm-legend-dot" style="background:var(--warning);"></span><span>收費房 ' + paidCount + ' (' + paidPct + '%)</span></div>';
+      html += '</div>';
+      html += '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  /* ===== Helper: 篩選按鈕 ===== */
+  function filterBtn(label, fee, count) {
+    var active = _filterFee === fee;
+    return '<button class="rm-filter-btn' + (active ? ' active' : '') + '" onclick="RoomPage.setFeeFilter(\'' + fee + '\')">' + label + ' (' + count + ')</button>';
+  }
+
+  /* ===== Helper: 數字格式 ===== */
+  function formatNum(n) {
+    if (n === 0) return '0';
+    return n.toFixed(2).replace(/\.?0+$/, '');
+  }
+
+  /* ===== Helper: HTML 轉義 ===== */
+  function escHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function escapeAttr(s) {
+    return String(s || '').replace(/"/g, '&quot;');
+  }
+
+  /* ===== 分頁/搜索/排序 ===== */
+  function goPage(n) { _page = n; render(); }
+  function onSearch(term) {
+    _search = term;
+    _page = 1;
+    if (_searchTimer) clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(function() { render(); }, 300);
+  }
+  function sortByCol(field) {
+    if (_sortField === field) { _sortAsc = !_sortAsc; } else { _sortField = field; _sortAsc = true; }
+    _page = 1;
+    render();
+  }
+  function setFeeFilter(fee) { _filterFee = fee; _page = 1; render(); }
+
+  /* ===== 狀態/費用標籤 ===== */
   function statusBadge(status) {
     var map = {
       'pending': '<span class="badge badge-pending">待確認</span>',
@@ -3249,8 +3459,9 @@ var RoomPage = (function() {
     return '<span class="badge badge-info">自動</span>';
   }
 
-  function selectTrip(tripId) { _selectedTrip = tripId || null; render(); }
+  function selectTrip(tripId) { _selectedTrip = tripId || null; _page = 1; render(); }
 
+  /* ===== 新增訂房 ===== */
   function showAddBooking() {
     var trip = Trips.getById(_selectedTrip);
     if (!trip) return;
@@ -3266,7 +3477,7 @@ var RoomPage = (function() {
     html += '</select></div>';
     html += '</div>';
 
-    // 三级联动
+    /* 三級聯動 */
     html += '<div class="form-row">';
     html += '<div class="form-group"><label>體系</label>';
     html += '<select id="bk-casino" class="form-input" onchange="RoomPage.onCasinoChange()">';
@@ -3392,6 +3603,7 @@ var RoomPage = (function() {
     render: render, selectTrip: selectTrip,
     showAddBooking: showAddBooking, onCasinoChange: onCasinoChange, onHotelChange: onHotelChange,
     saveBooking: saveBooking, editBooking: editBooking, saveEditBooking: saveEditBooking, delBooking: delBooking,
+    goPage: goPage, onSearch: onSearch, sortByCol: sortByCol, setFeeFilter: setFeeFilter,
   };
 })();
 

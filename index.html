@@ -805,45 +805,60 @@ a { color: var(--accent); text-decoration: none; }
   }
 }
 
-/* pages/room.css — 房務頁 訂房表 + 代理級折抵判定表 + 三級聯動 */
+/* pages/room.css — 房務頁 KPI + 狀態分佈 + 費用圓環 + 分頁表格 + 代理級折抵 */
 
-/* 訂房列表表格 */
+/* ===== 訂房列表表格 ===== */
 .rm-table th { white-space: nowrap; }
 .rm-table td { white-space: nowrap; }
+.rm-table th:hover { background: var(--bg-hover); }
 
-/* 訂房狀態標籤 */
-.rm-status { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; }
-.rm-status-pending { background: var(--badge-pending-bg); color: var(--badge-pending-text); }
-.rm-status-confirmed { background: var(--badge-info-bg); color: var(--badge-info-text); }
-.rm-status-checked-in { background: var(--badge-info-bg); color: var(--badge-info-text); }
-.rm-status-checked-out { background: var(--badge-success-bg); color: var(--badge-success-text); }
-.rm-status-cancelled { background: var(--badge-danger-bg); color: var(--badge-danger-text); }
+/* ===== 圖表區雙欄（狀態分佈 + 費用圓環） ===== */
+.rm-chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-md); margin-bottom: var(--spacing-md); }
+.rm-chart-card { background: var(--bg-secondary); border-radius: var(--radius-lg); padding: var(--spacing-md); box-shadow: var(--shadow-sm); border: 1px solid var(--border); }
+.rm-chart-title { font-size: var(--font-size-base); font-weight: 600; color: var(--text-primary); margin-bottom: var(--spacing-md); }
 
-/* 收費類型標籤 */
-.rm-fee-tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; }
-.rm-fee-free { background: var(--badge-success-bg); color: var(--badge-success-text); }
-.rm-fee-paid { background: var(--badge-danger-bg); color: var(--badge-danger-text); }
-.rm-fee-discount { background: var(--badge-pending-bg); color: var(--badge-pending-text); }
-.rm-fee-auto { background: var(--badge-info-bg); color: var(--badge-info-text); }
+/* ===== 狀態分佈 ===== */
+.rm-dist-row { margin-bottom: var(--spacing-sm); }
+.rm-dist-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.rm-dist-label { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-sm); color: var(--text-secondary); }
+.rm-dist-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.rm-dist-count { font-size: var(--font-size-sm); color: var(--text-primary); font-weight: 500; }
+.rm-dist-pct { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+.rm-dist-bar { height: 6px; background: var(--bg-primary); border-radius: 3px; overflow: hidden; }
+.rm-dist-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
 
-/* 代理級折抵判定表 */
-.rm-quota-card { margin-top: var(--spacing-md); }
+/* ===== 費用圓環 ===== */
+.rm-donut-wrap { display: flex; align-items: center; gap: var(--spacing-md); }
+.rm-donut { width: 110px; height: 110px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: var(--shadow-sm); }
+.rm-donut-center { width: 72px; height: 72px; border-radius: 50%; background: var(--bg-secondary); display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.rm-donut-num { font-size: var(--font-size-xl); font-weight: 700; color: var(--text-primary); line-height: 1; }
+.rm-donut-label { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.rm-donut-legend { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.rm-legend-item { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-sm); color: var(--text-secondary); }
+.rm-legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+/* ===== 快速篩選 ===== */
+.rm-quick-filters { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-md); flex-wrap: wrap; }
+.rm-filter-btn { padding: 6px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-secondary); color: var(--text-secondary); font-size: var(--font-size-sm); cursor: pointer; transition: all var(--transition-fast); }
+.rm-filter-btn:hover { background: var(--bg-hover); }
+.rm-filter-btn.active { background: var(--accent); color: var(--text-inverse); border-color: var(--accent); }
+
+/* ===== 搜索欄 ===== */
+.rm-search-bar { margin-bottom: var(--spacing-md); }
+.rm-search-bar .form-input { max-width: 400px; }
+
+/* ===== 代理級折抵判定表 ===== */
+.rm-quota-card { background: var(--bg-secondary); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: var(--spacing-md); margin-top: var(--spacing-md); border: 1px solid var(--border); }
 .rm-quota-table th { white-space: nowrap; }
-.rm-quota-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; min-width: 100px; }
-.rm-quota-fill { height: 100%; background: var(--success); transition: width var(--transition-normal); }
-.rm-quota-fill.unmet { background: var(--warning); }
 
-/* 三級聯動下拉 */
-.rm-cascade { display: flex; gap: var(--spacing-md); flex-wrap: wrap; }
-.rm-cascade .form-group { flex: 1; min-width: 120px; }
-
-/* 訂房 Modal 表單 */
+/* ===== 訂房 Modal 表單 ===== */
 .rm-booking-form { min-width: 450px; }
 
-/* 響應式 */
+/* ===== 響應式 ===== */
 @media (max-width: 768px) {
   .rm-booking-form { min-width: auto; }
-  .rm-cascade { flex-direction: column; }
+  .rm-chart-row { grid-template-columns: 1fr; }
+  .rm-donut-wrap { flex-direction: column; }
 }
 
 /* pages/agent.css — 代理帳務頁 卡片 + 配額條 + 會員/房間/開銷子表格 */
@@ -1273,6 +1288,6 @@ a { color: var(--accent); text-decoration: none; }
 <!-- Toast -->
 <div id="toast-container" class="toast-container"></div>
 
-<script src="app.js?v=1784334615416"></script>
+<script src="app.js?v=1784335922425"></script>
 </body>
 </html>
