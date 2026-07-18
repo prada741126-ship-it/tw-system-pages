@@ -206,10 +206,12 @@ var PAGES = [
   { id: 'page-pending',     name: 'pending',     label: '待結帳',     icon: '\u23F3',       shortcut: '2' },
   { id: 'page-member',      name: 'member',      label: '帳務',       icon: '\uD83D\uDCB3', shortcut: '3' },
   { id: 'page-room',        name: 'room',        label: '房務管理',   icon: '\uD83C\uDFE8', shortcut: '4' },
-  { id: 'page-shareholder', name: 'shareholder', label: '股東分潤',   icon: '\uD83D\uDCB0', shortcut: '5' },
-  { id: 'page-members-mgmt',name: 'membersMgmt', label: '會員管理',   icon: '\u2699\uFE0F', shortcut: '6' },
-  { id: 'page-history',     name: 'history',     label: '歷史查詢',   icon: '\uD83D\uDD0D', shortcut: '7' },
-  { id: 'page-settings',    name: 'settings',    label: '系統設定',   icon: '\u2699\uFE0F', shortcut: '8' },
+  { id: 'page-fees',        name: 'fees',        label: '費用收取',   icon: '\uD83D\uDCB2', shortcut: '5' },
+  { id: 'page-profit',      name: 'profit',      label: '利潤結算',   icon: '\uD83D\uDCCA', shortcut: '6' },
+  { id: 'page-shareholder', name: 'shareholder', label: '股東分潤',   icon: '\uD83D\uDCB0', shortcut: '7' },
+  { id: 'page-members-mgmt',name: 'membersMgmt', label: '會員管理',   icon: '\u2699\uFE0F', shortcut: '8' },
+  { id: 'page-history',     name: 'history',     label: '歷史查詢',   icon: '\uD83D\uDD0D', shortcut: '9' },
+  { id: 'page-settings',    name: 'settings',    label: '系統設定',   icon: '\u2699\uFE0F', shortcut: '0' },
 ];
 
 // ============================================================================
@@ -220,10 +222,12 @@ var SHORTCUTS = [
   { keys: 'Ctrl+2', desc: '待結帳' },
   { keys: 'Ctrl+3', desc: '帳務' },
   { keys: 'Ctrl+4', desc: '房務管理' },
-  { keys: 'Ctrl+5', desc: '股東分潤' },
-  { keys: 'Ctrl+6', desc: '會員管理' },
-  { keys: 'Ctrl+7', desc: '歷史查詢' },
-  { keys: 'Ctrl+8', desc: '系統設定' },
+  { keys: 'Ctrl+5', desc: '費用收取' },
+  { keys: 'Ctrl+6', desc: '利潤結算' },
+  { keys: 'Ctrl+7', desc: '股東分潤' },
+  { keys: 'Ctrl+8', desc: '會員管理' },
+  { keys: 'Ctrl+9', desc: '歷史查詢' },
+  { keys: 'Ctrl+0', desc: '系統設定' },
   { keys: 'Escape', desc: '關閉彈窗' },
 ];
 
@@ -3627,6 +3631,600 @@ var RoomPage = (function() {
 })();
 
 
+// === src/pages/fees.js ===
+/**
+ * pages/fees.js — 費用收取頁
+ * 選團 → 顯示該團所有訂房 → 自動計算會員洗碼折抵 → 判定免費/收費 → 向客人收
+ */
+var FeesPage = (function() {
+  var _selectedTrip = null;
+  var _page = 1;
+  var _search = '';
+  var _sortField = 'checkIn';
+  var _sortAsc = true;
+  var _searchTimer = null;
+  var PAGE_SIZE = 10;
+
+  function render() {
+    var container = document.getElementById('page-fees');
+    if (!container) return;
+
+    var trips = Trips.getAll().filter(function(t) { return t.status !== TRIP_STATUS.SEALED; });
+
+    var html = '';
+    /* 頁面標題 */
+    html += '<div class="card-header"><h3>費用收取</h3></div>';
+
+    /* 選團 */
+    html += '<div class="card" style="margin-bottom:16px;"><div class="card-body">';
+    html += '<div class="form-group" style="margin-bottom:0;"><label>選擇團</label>';
+    html += '<select id="fees-trip-select" class="form-input" style="width:auto;" onchange="FeesPage.selectTrip(this.value)">';
+    html += '<option value="">選擇團...</option>';
+    trips.forEach(function(t) {
+      html += '<option value="' + t.id + '"' + (_selectedTrip === t.id ? ' selected' : '') + '>' + t.id + ' ' + (t.note || '') + '</option>';
+    });
+    html += '</select></div></div></div>';
+
+    if (!_selectedTrip) {
+      html += '<div class="empty-state">請選擇一個團</div>';
+      container.innerHTML = html;
+      return;
+    }
+
+    var trip = Trips.getById(_selectedTrip);
+    if (!trip) { container.innerHTML = html + '<div class="empty-state">團不存在</div>'; return; }
+
+    /* 獲取該團所有訂房 */
+    var bookings = Bookings.getByTrip(_selectedTrip);
+
+    /* 獲取該團所有會員交易，按 memberId 匯總洗碼 */
+    var txs = MemberTxs.getByTrip(_selectedTrip);
+    var memberWash = {};
+    txs.forEach(function(tx) {
+      memberWash[tx.memberId] = (memberWash[tx.memberId] || 0) + (tx.washCode || 0);
+    });
+
+    /* 過濾 + 搜索 + 排序 */
+    var filtered = bookings;
+    if (_search) {
+      var q = _search.toLowerCase();
+      filtered = bookings.filter(function(b) {
+        var agent = Agents.getById(b.agentId);
+        var member = Members.getById(b.memberId);
+        return (b.guestName || '').toLowerCase().indexOf(q) >= 0 ||
+               (b.hotel || '').toLowerCase().indexOf(q) >= 0 ||
+               (b.roomType || '').toLowerCase().indexOf(q) >= 0 ||
+               (agent ? agent.name.toLowerCase().indexOf(q) >= 0 : false) ||
+               (member ? member.name.toLowerCase().indexOf(q) >= 0 : false);
+      });
+    }
+
+    var sorted = filtered.slice().sort(function(a, b) {
+      var va = a[_sortField] || '';
+      var vb = b[_sortField] || '';
+      if (va < vb) return _sortAsc ? -1 : 1;
+      if (va > vb) return _sortAsc ? 1 : -1;
+      return 0;
+    });
+
+    var totalItems = sorted.length;
+    var totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+    if (_page > totalPages) _page = totalPages;
+    var startIdx = (_page - 1) * PAGE_SIZE;
+    var pageItems = sorted.slice(startIdx, startIdx + PAGE_SIZE);
+
+    /* KPI 統計 */
+    var settings = Settings.load();
+    var roomFeeRate = settings.roomFeeRate || 150;
+    var kpi = { totalNights: 0, totalTh: 0, freeCount: 0, paidCount: 0, totalCharge: 0, totalDiscount: 0, totalRemaining: 0 };
+
+    /* 預先計算每筆訂房的費用數據 */
+    var calcData = {};
+    sorted.forEach(function(b) {
+      var th = b.threshold || 0;
+      var n = b.nights || 1;
+      var memWashRaw = (b.memberId && memberWash[b.memberId]) ? memberWash[b.memberId] * 10000 : 0;
+      var discount = Math.floor(th > 0 ? memWashRaw / th : 0);
+      var remaining = n - discount;
+      var isPaid = false;
+      if (b.feeType === FEE_TYPE.PAID) { isPaid = true; }
+      else if (b.feeType === FEE_TYPE.FREE) { isPaid = false; }
+      else if (b.feeType === FEE_TYPE.AUTO) { isPaid = remaining > 0; }
+      var charge = 0;
+      if (isPaid && remaining > 0 && th > 0) {
+        charge = Math.round((remaining * th / 100000) * roomFeeRate);
+        charge = b.chargeGuest || charge;
+      }
+
+      calcData[b.id] = { discount: discount, remaining: remaining, isPaid: isPaid, charge: charge, memWashRaw: memWashRaw };
+
+      kpi.totalNights += n;
+      kpi.totalTh += th * n;
+      kpi.totalDiscount += discount;
+      if (remaining > 0) kpi.totalRemaining += remaining;
+      if (isPaid) { kpi.paidCount++; kpi.totalCharge += (b.chargeGuest || charge); }
+      else { kpi.freeCount++; }
+    });
+
+    /* KPI 卡片 */
+    html += '<div class="kpi-grid" style="margin-bottom:16px;">';
+    html += kpiCard('總房晚', kpi.totalNights, 'var(--accent)');
+    html += kpiCard('總門檻(萬)', (kpi.totalTh / 10000).toFixed(0), 'var(--warning)');
+    html += kpiCard('折抵天數', kpi.totalDiscount, 'var(--success)');
+    html += kpiCard('剩餘天數', kpi.totalRemaining, 'var(--danger)');
+    html += kpiCard('免費房', kpi.freeCount, 'var(--success)');
+    html += kpiCard('收費房', kpi.paidCount, 'var(--danger)');
+    html += kpiCard('向客收合計', kpi.totalCharge.toLocaleString(), 'var(--info)');
+    html += '</div>';
+
+    /* 公式提示 */
+    html += '<div style="margin-bottom:12px;color:var(--text-secondary);font-size:var(--font-size-sm);">';
+    html += '折抵天數 = 會員總洗碼 ÷ 每晚門檻（無條件退位）；剩餘天數 > 0 → 收費，剩餘 = 0 → 免費。';
+    html += '向客人收 = (剩餘天數 × 每晚門檻 ÷ 10萬) × ' + roomFeeRate + ' 元。可手動覆蓋。';
+    html += '</div>';
+
+    /* 搜索欄 */
+    html += '<div class="rm-search-bar" style="margin-bottom:12px;">';
+    html += '<input type="text" class="form-input" placeholder="搜索客人、會員、代理、酒店..." value="' + escHtml(_search) + '" oninput="FeesPage.onSearch(this.value)">';
+    html += '</div>';
+
+    if (pageItems.length === 0) {
+      html += '<div class="empty-state">無訂房記錄</div>';
+    } else {
+      html += '<div class="table-wrapper"><table class="data-table" id="fees-table"><thead><tr>';
+      html += sortTH('客人', 'guestName');
+      html += '<th>會員</th>';
+      html += '<th>代理</th>';
+      html += sortTH('酒店', 'hotel');
+      html += '<th>房型</th>';
+      html += sortTH('入住', 'checkIn');
+      html += sortTH('退房', 'checkOut');
+      html += '<th class="num">晚</th>';
+      html += '<th class="num">每晚門檻<br>(萬)</th>';
+      html += '<th class="num">總門檻<br>(萬)</th>';
+      html += '<th class="num">會員洗碼<br>(萬)</th>';
+      html += '<th class="num">折抵<br>(天)</th>';
+      html += '<th class="num">剩餘<br>(天)</th>';
+      html += '<th>費用</th>';
+      html += '<th class="num">向客人收<br>(元)</th>';
+      html += '<th>操作</th>';
+      html += '</tr></thead><tbody>';
+
+      pageItems.forEach(function(b) {
+        var d = calcData[b.id];
+        var agent = Agents.getById(b.agentId);
+        var member = Members.getById(b.memberId);
+        var th = b.threshold || 0;
+        var n = b.nights || 1;
+        var thWan = (th / 10000).toFixed(0);
+        var totalThWan = (th * n / 10000).toFixed(0);
+        var memWashWan = memberWash[b.memberId] ? (memberWash[b.memberId]).toFixed(2) : '0';
+
+        html += '<tr>';
+        html += '<td style="font-weight:600;">' + escHtml(b.guestName || '') + '</td>';
+        html += '<td>' + (member ? escHtml(member.name) + '<br><span class="text-muted">' + escHtml(member.id) + '</span>' : '<span class="text-muted">-</span>') + '</td>';
+        html += '<td>' + (agent ? agent.name : b.agentId || '') + '</td>';
+        html += '<td>' + escHtml(b.hotel || '') + '</td>';
+        html += '<td style="font-size:var(--font-size-sm);">' + escHtml(b.roomType || '') + '</td>';
+        html += '<td>' + (b.checkIn || '') + '</td>';
+        html += '<td>' + (b.checkOut || '') + '</td>';
+        html += '<td class="num">' + n + '</td>';
+        html += '<td class="num">' + thWan + '</td>';
+        html += '<td class="num">' + totalThWan + '</td>';
+        html += '<td class="num">' + memWashWan + '</td>';
+        html += '<td class="num">' + (d.discount > 0 ? d.discount : '<span style="color:var(--text-muted);">0</span>') + '</td>';
+        html += '<td class="num">' + (d.remaining <= 0 ? '<span style="color:var(--success);font-weight:700;">達標</span>' : '<span style="color:var(--danger);font-weight:700;">' + d.remaining + '</span>') + '</td>';
+        html += '<td><span class="badge" style="background:' + (d.isPaid ? 'var(--danger)' : 'var(--success)') + ';color:#fff;">' + (d.isPaid ? '收費' : '免費') + '</span></td>';
+        html += '<td class="num"><input type="number" min="0" value="' + (b.chargeGuest || d.charge || 0) + '" onchange="FeesPage.updateCharge(\'' + b.id + '\', this.value)" style="width:70px;text-align:right;padding:2px 4px;font-size:var(--font-size-sm);border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-primary);color:var(--text-primary);"></td>';
+        html += '<td><button class="btn-sm" onclick="FeesPage.editBooking(\'' + b.id + '\')">編輯</button></td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+
+      /* 分頁 */
+      html += '<div class="paginator">';
+      html += '<span class="paginator-info">第 ' + _page + '/' + totalPages + ' 頁，共 ' + totalItems + ' 筆</span>';
+      html += '<div class="paginator-btns">';
+      html += '<button class="btn-sm" onclick="FeesPage.goPage(1)" ' + (_page === 1 ? 'disabled' : '') + '>首頁</button> ';
+      html += '<button class="btn-sm" onclick="FeesPage.goPage(' + (_page - 1) + ')" ' + (_page === 1 ? 'disabled' : '') + '>上一頁</button> ';
+      html += '<button class="btn-sm" onclick="FeesPage.goPage(' + (_page + 1) + ')" ' + (_page >= totalPages ? 'disabled' : '') + '>下一頁</button> ';
+      html += '<button class="btn-sm" onclick="FeesPage.goPage(' + totalPages + ')" ' + (_page >= totalPages ? 'disabled' : '') + '>末頁</button>';
+      html += '</div></div>';
+    }
+
+    /* 代理匯總表 */
+    var agents = Agents.getAll();
+    var agentBookings = {};
+    bookings.forEach(function(b) {
+      if (!agentBookings[b.agentId]) agentBookings[b.agentId] = [];
+      agentBookings[b.agentId].push(b);
+    });
+
+    html += '<div class="card" style="margin-top:16px;"><div class="card-title">代理折抵匯總</div>';
+    html += '<div class="table-wrapper"><table class="data-table"><thead><tr>';
+    html += '<th>代理</th><th class="num">訂房數</th><th class="num">總房晚</th><th class="num">總門檻(萬)</th><th class="num">總折抵(天)</th><th class="num">剩餘(天)</th><th class="num">收費房</th><th class="num">免費房</th><th class="num">向客收合計</th>';
+    html += '</tr></thead><tbody>';
+
+    agents.forEach(function(ag) {
+      var ab = agentBookings[ag.id];
+      if (!ab || !ab.length) return;
+      var agNights = 0, agTh = 0, agDisc = 0, agRem = 0, agPaid = 0, agFree = 0, agCharge = 0;
+      ab.forEach(function(b) {
+        var cd = calcData[b.id];
+        var bn = b.nights || 1;
+        agNights += bn;
+        agTh += (b.threshold || 0) * bn;
+        agDisc += cd.discount;
+        if (cd.remaining > 0) agRem += cd.remaining;
+        if (cd.isPaid) { agPaid++; agCharge += (b.chargeGuest || cd.charge || 0); }
+        else { agFree++; }
+      });
+      html += '<tr>';
+      html += '<td style="font-weight:600;">' + escHtml(ag.name) + '</td>';
+      html += '<td class="num">' + ab.length + '</td>';
+      html += '<td class="num">' + agNights + '</td>';
+      html += '<td class="num">' + (agTh / 10000).toFixed(0) + '</td>';
+      html += '<td class="num">' + agDisc + '</td>';
+      html += '<td class="num" style="color:var(--danger);font-weight:600;">' + agRem + '</td>';
+      html += '<td class="num" style="color:var(--danger);">' + agPaid + '</td>';
+      html += '<td class="num" style="color:var(--success);">' + agFree + '</td>';
+      html += '<td class="num" style="font-weight:600;">' + agCharge.toLocaleString() + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div></div>';
+
+    container.innerHTML = html;
+  }
+
+  function kpiCard(label, value, color) {
+    return '<div class="kpi-card" style="border-left:3px solid ' + color + ';">' +
+      '<div class="kpi-label" style="font-size:var(--font-size-sm);color:var(--text-secondary);">' + escHtml(label) + '</div>' +
+      '<div class="kpi-value" style="font-size:1.5em;font-weight:700;">' + value + '</div></div>';
+  }
+
+  function sortTH(label, field) {
+    var arrow = '';
+    if (_sortField === field) {
+      arrow = _sortAsc ? ' ▲' : ' ▼';
+    }
+    return '<th onclick="FeesPage.sortByCol(\'' + field + '\')" style="cursor:pointer;white-space:nowrap;">' + label + '<span style="font-size:10px;color:var(--accent);">' + arrow + '</span></th>';
+  }
+
+  function selectTrip(tripId) {
+    _selectedTrip = tripId;
+    _page = 1;
+    _search = '';
+    render();
+  }
+
+  function goPage(n) { _page = n; render(); }
+
+  function onSearch(term) {
+    _search = term;
+    _page = 1;
+    if (_searchTimer) clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(function() { render(); }, 300);
+  }
+
+  function sortByCol(field) {
+    if (_sortField === field) { _sortAsc = !_sortAsc; }
+    else { _sortField = field; _sortAsc = true; }
+    _page = 1;
+    render();
+  }
+
+  function updateCharge(bookingId, val) {
+    var num = parseFloat(val) || 0;
+    Bookings.update(bookingId, { chargeGuest: num, feeManualOverride: true });
+    Toast.success('向客人收已更新');
+  }
+
+  function editBooking(bookingId) {
+    /* 橋接到編輯彈窗 */
+    var roomPage = window['Room' + 'Page'];
+    if (roomPage && roomPage.editBooking) {
+      roomPage.editBooking(bookingId);
+    }
+  }
+
+  function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  return {
+    render: render,
+    selectTrip: selectTrip,
+    goPage: goPage,
+    onSearch: onSearch,
+    sortByCol: sortByCol,
+    updateCharge: updateCharge,
+    editBooking: editBooking,
+  };
+})();
+
+function renderFees() { FeesPage.render(); }
+
+
+// === src/pages/profit.js ===
+/**
+ * pages/profit.js — 利潤結算頁
+ * 已退房訂房 → 填入交公司金額 → 利潤=向客人收-交公司 → 批量確認歸檔
+ */
+var ProfitPage = (function() {
+  var _selectedTrip = null;
+  var _page = 1;
+  var _search = '';
+  var _sortField = 'checkOut';
+  var _sortAsc = true;
+  var _searchTimer = null;
+  var PAGE_SIZE = 10;
+  var _selectedIds = {}; /* batch selection */
+
+  function render() {
+    var container = document.getElementById('page-profit');
+    if (!container) return;
+
+    var trips = Trips.getAll().filter(function(t) { return t.status !== TRIP_STATUS.SEALED; });
+
+    var html = '';
+    html += '<div class="card-header"><h3>利潤結算</h3></div>';
+
+    /* 選團 */
+    html += '<div class="card" style="margin-bottom:16px;"><div class="card-body">';
+    html += '<div class="form-group" style="margin-bottom:0;"><label>選擇團</label>';
+    html += '<select id="profit-trip-select" class="form-input" style="width:auto;" onchange="ProfitPage.selectTrip(this.value)">';
+    html += '<option value="">選擇團...</option>';
+    trips.forEach(function(t) {
+      html += '<option value="' + t.id + '"' + (_selectedTrip === t.id ? ' selected' : '') + '>' + t.id + ' ' + (t.note || '') + '</option>';
+    });
+    html += '</select></div></div></div>';
+
+    if (!_selectedTrip) {
+      html += '<div class="empty-state">請選擇一個團</div>';
+      container.innerHTML = html;
+      return;
+    }
+
+    /* 只顯示已退房的訂房 */
+    var allBookings = Bookings.getByTrip(_selectedTrip);
+    var bookings = allBookings.filter(function(b) { return b.status === BOOKING_STATUS.CHECKED_OUT; });
+
+    if (_search) {
+      var q = _search.toLowerCase();
+      bookings = bookings.filter(function(b) {
+        var agent = Agents.getById(b.agentId);
+        var member = Members.getById(b.memberId);
+        return (b.guestName || '').toLowerCase().indexOf(q) >= 0 ||
+               (b.hotel || '').toLowerCase().indexOf(q) >= 0 ||
+               (agent ? agent.name.toLowerCase().indexOf(q) >= 0 : false) ||
+               (member ? member.name.toLowerCase().indexOf(q) >= 0 : false);
+      });
+    }
+
+    var sorted = bookings.slice().sort(function(a, b) {
+      var va = a[_sortField] || '';
+      var vb = b[_sortField] || '';
+      if (va < vb) return _sortAsc ? -1 : 1;
+      if (va > vb) return _sortAsc ? 1 : -1;
+      return 0;
+    });
+
+    var totalItems = sorted.length;
+    var totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+    if (_page > totalPages) _page = totalPages;
+    var startIdx = (_page - 1) * PAGE_SIZE;
+    var pageItems = sorted.slice(startIdx, startIdx + PAGE_SIZE);
+
+    /* KPI */
+    var totalChargeGuest = 0, totalChargeCompany = 0, totalProfit = 0, overdueCount = 0;
+    var now = new Date();
+    sorted.forEach(function(b) {
+      totalChargeGuest += (b.chargeGuest || 0);
+      totalChargeCompany += (b.chargeCompany || 0);
+      totalProfit += ((b.chargeGuest || 0) - (b.chargeCompany || 0));
+      if (b.checkOut) {
+        var coDate = new Date(b.checkOut);
+        var daysSince = Math.floor((now - coDate) / (1000 * 60 * 60 * 24));
+        if (daysSince > 7) overdueCount++;
+      }
+    });
+
+    html += '<div class="kpi-grid" style="margin-bottom:16px;">';
+    html += kpiCard('待結算筆數', sorted.length, 'var(--warning)');
+    html += kpiCard('向客人收合計', totalChargeGuest.toLocaleString(), 'var(--info)');
+    html += kpiCard('交公司合計', totalChargeCompany.toLocaleString(), 'var(--danger)');
+    html += kpiCard('利潤合計', (totalProfit >= 0 ? '+' : '') + totalProfit.toLocaleString(), totalProfit >= 0 ? 'var(--success)' : 'var(--danger)');
+    if (overdueCount > 0) { html += kpiCard('超期>7天', overdueCount + '筆', 'var(--danger)'); }
+    html += '</div>';
+
+    /* 公式 */
+    html += '<div style="margin-bottom:12px;color:var(--text-secondary);font-size:var(--font-size-sm);">利潤 = 向客人收 − 交公司。填入交公司金額後自動計算。</div>';
+
+    /* 批量操作 */
+    var selCount = Object.keys(_selectedIds).length;
+    html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">';
+    html += '<div class="rm-search-bar" style="flex:1;"><input type="text" class="form-input" placeholder="搜索客人、會員、代理、酒店..." value="' + escHtml(_search) + '" oninput="ProfitPage.onSearch(this.value)"></div>';
+    if (selCount > 0) {
+      html += '<button class="btn btn-primary" onclick="ProfitPage.batchArchive()">確認歸檔 (' + selCount + '筆)</button>';
+    }
+    html += '</div>';
+
+    if (pageItems.length === 0) {
+      html += '<div class="empty-state">無待結算訂房</div>';
+    } else {
+      html += '<div class="table-wrapper"><table class="data-table" id="profit-table"><thead><tr>';
+      html += '<th style="width:30px;"><input type="checkbox" onclick="ProfitPage.toggleAll(this)" title="全選"></th>';
+      html += '<th>客人</th>';
+      html += '<th>會員</th>';
+      html += '<th>代理</th>';
+      html += sortTH('酒店', 'hotel');
+      html += '<th>房型</th>';
+      html += sortTH('入住', 'checkIn');
+      html += sortTH('退房', 'checkOut');
+      html += '<th class="num">晚</th>';
+      html += '<th>費用</th>';
+      html += '<th class="num">向客人收</th>';
+      html += '<th class="num">交公司</th>';
+      html += '<th class="num">利潤</th>';
+      html += '<th>操作</th>';
+      html += '</tr></thead><tbody>';
+
+      pageItems.forEach(function(b) {
+        var agent = Agents.getById(b.agentId);
+        var member = Members.getById(b.memberId);
+        var chargeGuest = b.chargeGuest || 0;
+        var chargeCompany = b.chargeCompany || 0;
+        var profit = chargeGuest - chargeCompany;
+        var checked = _selectedIds[b.id] ? ' checked' : '';
+
+        /* 超期檢查 */
+        var overdueClass = '';
+        if (b.checkOut) {
+          var coDate2 = new Date(b.checkOut);
+          var daysSince2 = Math.floor((now - coDate2) / (1000 * 60 * 60 * 24));
+          if (daysSince2 > 7) overdueClass = ' style="color:var(--danger);font-weight:600;"';
+        }
+
+        html += '<tr' + (checked ? ' style="background:var(--bg-hover);"' : '') + '>';
+        html += '<td><input type="checkbox" ' + checked + ' onclick="ProfitPage.toggleSelect(\'' + b.id + '\')"></td>';
+        html += '<td style="font-weight:600;">' + escHtml(b.guestName || '') + '</td>';
+        html += '<td>' + (member ? escHtml(member.name) + '<br><span class="text-muted">' + escHtml(member.id) + '</span>' : '<span class="text-muted">-</span>') + '</td>';
+        html += '<td>' + (agent ? agent.name : b.agentId || '') + '</td>';
+        html += '<td>' + escHtml(b.hotel || '') + '</td>';
+        html += '<td style="font-size:var(--font-size-sm);">' + escHtml(b.roomType || '') + '</td>';
+        html += '<td' + overdueClass + '>' + (b.checkIn || '') + '</td>';
+        html += '<td' + overdueClass + '>' + (b.checkOut || '') + '</td>';
+        html += '<td class="num">' + (b.nights || 1) + '</td>';
+        html += '<td><span class="badge" style="background:var(--danger);color:#fff;">收費</span></td>';
+        html += '<td class="num">' + chargeGuest.toLocaleString() + '</td>';
+        html += '<td class="num"><input type="number" min="0" value="' + chargeCompany + '" onchange="ProfitPage.updateCompany(\'' + b.id + '\', this.value)" style="width:80px;text-align:right;padding:2px 4px;font-size:var(--font-size-sm);border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-primary);color:var(--text-primary);"></td>';
+        html += '<td class="num" style="font-weight:700;' + (profit >= 0 ? 'color:var(--success);' : 'color:var(--danger);') + '">' + (profit >= 0 ? '+' : '') + profit.toLocaleString() + '</td>';
+        html += '<td><button class="btn-sm btn-primary" onclick="ProfitPage.archiveOne(\'' + b.id + '\')">歸檔</button></td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+
+      /* 分頁 */
+      html += '<div class="paginator">';
+      html += '<span class="paginator-info">第 ' + _page + '/' + totalPages + ' 頁，共 ' + totalItems + ' 筆</span>';
+      html += '<div class="paginator-btns">';
+      html += '<button class="btn-sm" onclick="ProfitPage.goPage(1)" ' + (_page === 1 ? 'disabled' : '') + '>首頁</button> ';
+      html += '<button class="btn-sm" onclick="ProfitPage.goPage(' + (_page - 1) + ')" ' + (_page === 1 ? 'disabled' : '') + '>上一頁</button> ';
+      html += '<button class="btn-sm" onclick="ProfitPage.goPage(' + (_page + 1) + ')" ' + (_page >= totalPages ? 'disabled' : '') + '>下一頁</button> ';
+      html += '<button class="btn-sm" onclick="ProfitPage.goPage(' + totalPages + ')" ' + (_page >= totalPages ? 'disabled' : '') + '>末頁</button>';
+      html += '</div></div>';
+    }
+
+    container.innerHTML = html;
+  }
+
+  function kpiCard(label, value, color) {
+    return '<div class="kpi-card" style="border-left:3px solid ' + color + ';">' +
+      '<div class="kpi-label" style="font-size:var(--font-size-sm);color:var(--text-secondary);">' + escHtml(label) + '</div>' +
+      '<div class="kpi-value" style="font-size:1.5em;font-weight:700;">' + value + '</div></div>';
+  }
+
+  function sortTH(label, field) {
+    var arrow = '';
+    if (_sortField === field) {
+      arrow = _sortAsc ? ' ▲' : ' ▼';
+    }
+    return '<th onclick="ProfitPage.sortByCol(\'' + field + '\')" style="cursor:pointer;white-space:nowrap;">' + label + '<span style="font-size:10px;color:var(--accent);">' + arrow + '</span></th>';
+  }
+
+  function selectTrip(tripId) {
+    _selectedTrip = tripId;
+    _page = 1;
+    _search = '';
+    _selectedIds = {};
+    render();
+  }
+
+  function goPage(n) { _page = n; render(); }
+
+  function onSearch(term) {
+    _search = term;
+    _page = 1;
+    if (_searchTimer) clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(function() { render(); }, 300);
+  }
+
+  function sortByCol(field) {
+    if (_sortField === field) { _sortAsc = !_sortAsc; }
+    else { _sortField = field; _sortAsc = true; }
+    _page = 1;
+    render();
+  }
+
+  function updateCompany(bookingId, val) {
+    var num = parseFloat(val) || 0;
+    Bookings.update(bookingId, { chargeCompany: num });
+    Toast.success('交公司金額已更新');
+    /* 重新渲染以更新利潤欄 */
+    setTimeout(function() { render(); }, 200);
+  }
+
+  function toggleSelect(id) {
+    if (_selectedIds[id]) { delete _selectedIds[id]; }
+    else { _selectedIds[id] = true; }
+    render();
+  }
+
+  function toggleAll(checkbox) {
+    var allBookings = Bookings.getByTrip(_selectedTrip).filter(function(b) { return b.status === BOOKING_STATUS.CHECKED_OUT; });
+    if (checkbox.checked) {
+      allBookings.forEach(function(b) { _selectedIds[b.id] = true; });
+    } else {
+      _selectedIds = {};
+    }
+    render();
+  }
+
+  function batchArchive() {
+    var ids = Object.keys(_selectedIds);
+    if (ids.length === 0) { Toast.show('未選擇任何訂房', 'warning'); return; }
+    Modal.confirm('確定將 ' + ids.length + ' 筆訂房歸檔為歷史記錄？歸檔後不可復原。', function() {
+      ids.forEach(function(id) {
+        Bookings.update(id, { _archived: true, _archivedAt: Date.now() });
+      });
+      _selectedIds = {};
+      Toast.success(ids.length + ' 筆已歸檔');
+      render();
+    });
+  }
+
+  function archiveOne(id) {
+    Modal.confirm('確定歸檔此訂房？', function() {
+      Bookings.update(id, { _archived: true, _archivedAt: Date.now() });
+      delete _selectedIds[id];
+      Toast.success('已歸檔');
+      render();
+    });
+  }
+
+  function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  return {
+    render: render,
+    selectTrip: selectTrip,
+    goPage: goPage,
+    onSearch: onSearch,
+    sortByCol: sortByCol,
+    updateCompany: updateCompany,
+    toggleSelect: toggleSelect,
+    toggleAll: toggleAll,
+    batchArchive: batchArchive,
+    archiveOne: archiveOne,
+  };
+})();
+
+function renderProfit() { ProfitPage.render(); }
+
+
 // === src/pages/agent.js ===
 /**
  * pages/agent.js — 代理帐务页
@@ -4833,6 +5431,8 @@ function exposeGlobals() {
   window.PendingPage = PendingPage;
   window.MemberPage = MemberPage;
   window.RoomPage = RoomPage;
+  window.FeesPage = FeesPage;
+  window.ProfitPage = ProfitPage;
   window.AgentPage = AgentPage;
   window.ShareholderPage = ShareholderPage;
   window.MembersMgmtPage = MembersMgmtPage;
@@ -4859,6 +5459,8 @@ function onPageChange(pageName) {
     'pending':     function() { PendingPage.render(); },
     'member':      function() { MemberPage.render(); },
     'room':        function() { RoomPage.render(); },
+    'fees':        function() { FeesPage.render(); },
+    'profit':      function() { ProfitPage.render(); },
     'agent':       function() { AgentPage.render(); },
     'shareholder': function() { ShareholderPage.render(); },
     'membersMgmt': function() { MembersMgmtPage.render(); },

@@ -862,6 +862,28 @@ a { color: var(--accent); text-decoration: none; }
   .rm-donut-wrap { flex-direction: column; }
 }
 
+/**
+ * css/pages/fees.css — 費用收取頁樣式
+ */
+#fees-table th { white-space: nowrap; }
+#fees-table th.num { text-align: right; }
+#fees-table td { white-space: nowrap; }
+#fees-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+#fees-table input[type="number"] { -moz-appearance: textfield; }
+#fees-table input[type="number"]::-webkit-inner-spin-button,
+#fees-table input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/**
+ * css/pages/profit.css — 利潤結算頁樣式
+ */
+#profit-table th { white-space: nowrap; }
+#profit-table th.num { text-align: right; }
+#profit-table td { white-space: nowrap; }
+#profit-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+#profit-table input[type="number"] { -moz-appearance: textfield; }
+#profit-table input[type="number"]::-webkit-inner-spin-button,
+#profit-table input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
 /* pages/agent.css — 代理帳務頁 卡片 + 配額條 + 會員/房間/開銷子表格 */
 
 /* 代理卡片 */
@@ -1267,6 +1289,8 @@ a { color: var(--accent); text-decoration: none; }
     <div id="page-pending" class="page-section"></div>
     <div id="page-member" class="page-section"></div>
     <div id="page-room" class="page-section"></div>
+    <div id="page-fees" class="page-section"></div>
+    <div id="page-profit" class="page-section"></div>
     <div id="page-agent" class="page-section"></div>
     <div id="page-shareholder" class="page-section"></div>
     <div id="page-members-mgmt" class="page-section"></div>
@@ -1289,6 +1313,6 @@ a { color: var(--accent); text-decoration: none; }
 <!-- Toast -->
 <div id="toast-container" class="toast-container"></div>
 
-<script src="app.js?v=1784339503395"></script>
+<script src="app.js?v=1784340330750"></script>
 </body>
 </html>
