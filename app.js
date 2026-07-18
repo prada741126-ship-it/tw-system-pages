@@ -2525,6 +2525,7 @@ var MemberPage = (function() {
     html += '</select>';
     // 代理筛选
     if (_selectedTrip) {
+      var tripObj = Trips.getById(_selectedTrip);
       var tripAgents = Agents.getAll();
       html += '<select id="member-agent-filter" class="form-input" style="width:auto;" onchange="MemberPage.selectAgent(this.value)">';
       html += '<option value="">全部代理</option>';
@@ -2532,6 +2533,10 @@ var MemberPage = (function() {
         html += '<option value="' + ag.id + '"' + (_selectedAgent === ag.id ? ' selected' : '') + '>' + ag.name + '</option>';
       });
       html += '</select>';
+      // 送入待結帳按鈕（僅 ACTIVE 狀態顯示）
+      if (tripObj && tripObj.status === TRIP_STATUS.ACTIVE) {
+        html += '<button class="btn btn-warning" onclick="MemberPage.markPending(\'' + _selectedTrip + '\')">送入待結帳</button>';
+      }
     }
     html += '</div>';
     html += '</div>';
@@ -3114,12 +3119,22 @@ var MemberPage = (function() {
     });
   }
 
+  function markPending(tripId) {
+    Modal.confirm('確定要將團 ' + tripId + ' 送入待結帳？\n送入後此團將無法再新增/修改帳務，需至「待結帳」頁面進行封存。', function() {
+      Trips.update(tripId, { status: TRIP_STATUS.PENDING_SETTLEMENT, lastSettlementDate: new Date().toISOString().slice(0, 10) });
+      Toast.success('團 ' + tripId + ' 已送入待結帳');
+      _selectedTrip = null;
+      render();
+    });
+  }
+
   return {
     render: render, selectTrip: selectTrip, selectAgent: selectAgent,
     showAddTx: showAddTx, saveTx: saveTx, onMemberChange: onMemberChange, showAddAgent: showAddAgent,
     editTx: editTx, saveEditTx: saveEditTx, delTx: delTx,
     addExpenseRow: addExpenseRow, _updExp: _updExp, _updExpType: _updExpType, _delExp: _delExp,
     calcUpDown: calcUpDown, calcWash: calcWash,
+    markPending: markPending,
   };
 })();
 
