@@ -206,11 +206,9 @@ var PAGES = [
   { id: 'page-pending',     name: 'pending',     label: '待結帳',     icon: '\u23F3',       shortcut: '2' },
   { id: 'page-member',      name: 'member',      label: '帳務',       icon: '\uD83D\uDCB3', shortcut: '3' },
   { id: 'page-room',        name: 'room',        label: '房務管理',   icon: '\uD83C\uDFE8', shortcut: '4' },
-  { id: 'page-fees',        name: 'fees',        label: '費用收取',   icon: '\uD83D\uDCB2', shortcut: '5' },
-  { id: 'page-profit',      name: 'profit',      label: '利潤結算',   icon: '\uD83D\uDCCA', shortcut: '6' },
-  { id: 'page-shareholder', name: 'shareholder', label: '股東分潤',   icon: '\uD83D\uDCB0', shortcut: '7' },
-  { id: 'page-members-mgmt',name: 'membersMgmt', label: '會員管理',   icon: '\u2699\uFE0F', shortcut: '8' },
-  { id: 'page-history',     name: 'history',     label: '歷史查詢',   icon: '\uD83D\uDD0D', shortcut: '9' },
+  { id: 'page-shareholder', name: 'shareholder', label: '股東分潤',   icon: '\uD83D\uDCB0', shortcut: '5' },
+  { id: 'page-members-mgmt',name: 'membersMgmt', label: '會員管理',   icon: '\u2699\uFE0F', shortcut: '6' },
+  { id: 'page-history',     name: 'history',     label: '歷史查詢',   icon: '\uD83D\uDD0D', shortcut: '7' },
   { id: 'page-settings',    name: 'settings',    label: '系統設定',   icon: '\u2699\uFE0F', shortcut: '0' },
 ];
 
@@ -222,11 +220,9 @@ var SHORTCUTS = [
   { keys: 'Ctrl+2', desc: '待結帳' },
   { keys: 'Ctrl+3', desc: '帳務' },
   { keys: 'Ctrl+4', desc: '房務管理' },
-  { keys: 'Ctrl+5', desc: '費用收取' },
-  { keys: 'Ctrl+6', desc: '利潤結算' },
-  { keys: 'Ctrl+7', desc: '股東分潤' },
-  { keys: 'Ctrl+8', desc: '會員管理' },
-  { keys: 'Ctrl+9', desc: '歷史查詢' },
+  { keys: 'Ctrl+5', desc: '股東分潤' },
+  { keys: 'Ctrl+6', desc: '會員管理' },
+  { keys: 'Ctrl+7', desc: '歷史查詢' },
   { keys: 'Ctrl+0', desc: '系統設定' },
   { keys: 'Escape', desc: '關閉彈窗' },
 ];
@@ -3197,7 +3193,7 @@ var RoomPage = (function() {
 
     /* === 頁面標頭 === */
     html += '<div class="card">';
-    html += '<div class="card-header"><h3>房務管理</h3>';
+    html += '<div class="card-header" style="justify-content:center;gap:16px;"><h3>房務管理</h3>';
     html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
     html += '<select id="room-trip-select" class="form-input" style="width:auto;" onchange="RoomPage.selectTrip(this.value)">';
     html += '<option value="">全部訂房</option>';
