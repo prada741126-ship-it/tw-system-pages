@@ -813,10 +813,14 @@ a { color: var(--accent); text-decoration: none; }
 .rm-table td { white-space: nowrap; }
 .rm-table th:hover { background: var(--bg-hover); }
 
-/* ===== 圖表區雙欄（狀態分佈 + 費用圓環） ===== */
-.rm-chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-md); margin-bottom: var(--spacing-md); }
-.rm-chart-card { background: var(--bg-secondary); border-radius: var(--radius-lg); padding: var(--spacing-md); box-shadow: var(--shadow-sm); border: 1px solid var(--border); }
-.rm-chart-title { font-size: var(--font-size-base); font-weight: 600; color: var(--text-primary); margin-bottom: var(--spacing-md); }
+/* ===== 數字列右對齊（統一規範） ===== */
+.data-table th.num,
+.data-table td.num { text-align: right; }
+
+/* ===== 狀態分佈 — 緊湊版（單欄，去除費用圓環後獨佔） ===== */
+.rm-chart-row { display: grid; grid-template-columns: 1fr; gap: var(--spacing-sm); margin-bottom: var(--spacing-sm); max-width: 480px; }
+.rm-chart-card { background: var(--bg-secondary); border-radius: var(--radius); padding: var(--spacing-sm); box-shadow: var(--shadow-sm); border: 1px solid var(--border); }
+.rm-chart-title { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); margin-bottom: var(--spacing-sm); }
 
 /* ===== 狀態分佈 ===== */
 .rm-dist-row { margin-bottom: var(--spacing-sm); }
@@ -1328,6 +1332,6 @@ a { color: var(--accent); text-decoration: none; }
 <!-- Toast -->
 <div id="toast-container" class="toast-container"></div>
 
-<script src="app.js?v=1784379611133"></script>
+<script src="app.js?v=1784400370333"></script>
 </body>
 </html>

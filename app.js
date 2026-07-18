@@ -3233,10 +3233,9 @@ var RoomPage = (function() {
       html += '</div>';
     }
 
-    /* === 狀態分佈 + 費用圓環 === */
+    /* === 狀態分佈（緊湊單欄，去除費用圓環） === */
     html += '<div class="rm-chart-row">';
     html += buildStatusCard(statusCounts, displayBookings.length);
-    html += buildFeeDonut(freeCount, paidCount);
     html += '</div>';
 
     /* === 快速篩選 === */
