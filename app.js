@@ -3267,6 +3267,7 @@ var RoomPage = (function() {
     } else {
       html += '<div class="table-wrapper"><table class="data-table rm-table"><thead><tr>';
       html += sortTH('客人', 'guestName');
+      html += '<th>會員</th>';
       html += '<th>代理</th>';
       html += sortTH('酒店', 'hotel');
       html += '<th>房型</th>';
@@ -3281,8 +3282,10 @@ var RoomPage = (function() {
       html += '</tr></thead><tbody>';
       pageItems.forEach(function(b) {
         var agent = Agents.getById(b.agentId);
+        var member = Members.getById(b.memberId);
         html += '<tr>';
         html += '<td style="font-weight:600;">' + escHtml(b.guestName || '') + '</td>';
+        html += '<td>' + (member ? escHtml(member.name) + '<br><span class="text-muted">' + escHtml(member.id) + '</span>' : '<span class="text-muted">-</span>') + '</td>';
         html += '<td>' + (agent ? agent.name : b.agentId || '') + '</td>';
         html += '<td>' + escHtml(b.hotel || '') + '</td>';
         html += '<td>' + escHtml(b.roomType || '') + '</td>';
@@ -3563,12 +3566,20 @@ var RoomPage = (function() {
   function editBooking(id) {
     var b = Bookings.getById(id);
     if (!b) return;
+    var members = Members.getAll();
     var html = '<div class="form-row">';
     html += '<div class="form-group"><label>確認號</label><input type="text" id="eb-confirm" class="form-input" value="' + (b.confirmNo || '') + '"></div>';
     html += '<div class="form-group"><label>狀態</label>';
     html += '<select id="eb-status" class="form-input">';
     Object.values(BOOKING_STATUS).forEach(function(s) {
       html += '<option value="' + s + '"' + (b.status === s ? ' selected' : '') + '>' + (STATUS_LABELS[s] || s) + '</option>';
+    });
+    html += '</select></div></div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>關聯會員</label>';
+    html += '<select id="eb-member" class="form-input"><option value="">純住宿(不關聯)</option>';
+    members.forEach(function(m) {
+      html += '<option value="' + m.id + '"' + (b.memberId === m.id ? ' selected' : '') + '>' + m.id + ' ' + m.name + '</option>';
     });
     html += '</select></div></div>';
     html += '<div class="form-row">';
@@ -3590,6 +3601,7 @@ var RoomPage = (function() {
       confirmNo: document.getElementById('eb-confirm').value,
       status: document.getElementById('eb-status').value,
       feeType: document.getElementById('eb-fee').value,
+      memberId: document.getElementById('eb-member').value || null,
       feeManualOverride: true,
       chargeGuest: parseFloat(document.getElementById('eb-charge-guest').value) || 0,
     });
