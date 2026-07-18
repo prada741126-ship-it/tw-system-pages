@@ -2102,14 +2102,92 @@ var OverviewPage = (function() {
     var html = '';
     // KPI 卡片
     html += '<div class="kpi-grid">';
-    html += kpiCard('進行中團', activeTrips.length, 'active');
-    html += kpiCard('待結帳團', pendingTrips.length, pendingTrips.length > 0 ? 'warning' : 'normal');
-    html += kpiCard('已封存團', sealedTrips.length, 'normal');
-    html += kpiCard('會員數', members.length, 'normal');
-    html += kpiCard('代理數', agents.length, 'normal');
-    html += kpiCard('股東數', shareholders.length, 'normal');
-    html += kpiCard('總洗碼(萬)', formatNum(totalWash), 'highlight');
-    html += kpiCard('活躍訂房', activeBookings, 'normal');
+    html += kpiCard('進行中團', activeTrips.length, 'active', ICONS.active);
+    html += kpiCard('待結帳團', pendingTrips.length, pendingTrips.length > 0 ? 'warning' : 'normal', ICONS.warning);
+    html += kpiCard('已封存團', sealedTrips.length, 'normal', ICONS.archive);
+    html += kpiCard('會員數', members.length, 'normal', ICONS.member);
+    html += kpiCard('代理數', agents.length, 'normal', ICONS.agent);
+    html += kpiCard('股東數', shareholders.length, 'normal', ICONS.shareholder);
+    html += kpiCard('總洗碼(萬)', formatNum(totalWash), 'highlight', ICONS.chart);
+    html += kpiCard('活躍訂房', activeBookings, 'normal', ICONS.booking);
+    html += '</div>';
+
+    // 圖表區（雙欄）
+    html += '<div class="ov-chart-row">';
+
+    // 左：各廳洗碼佔比（迷你圓環）
+    var currentMonth = new Date().toISOString().slice(0, 7);
+    var monthTxs = mtxs.filter(function(t) { return t.date && t.date.substring(0, 7) === currentMonth; });
+    var hallWash = {};
+    var totalMonthWash = 0;
+    VIP_HALLS.forEach(function(h) { hallWash[h.id] = 0; });
+    monthTxs.forEach(function(tx) {
+      var hallId = tx.vipHallId;
+      if (tx.tripId) {
+        var trip = Trips.getById(tx.tripId);
+        if (trip && Array.isArray(trip.hallIds) && trip.hallIds.length > 0) hallId = trip.hallIds[0];
+      }
+      totalMonthWash += (tx.washCode || 0);
+      if (hallWash[hallId] !== undefined) hallWash[hallId] += (tx.washCode || 0);
+    });
+
+    html += '<div class="ov-chart-card">';
+    html += '<h4 class="ov-chart-title">本月各廳洗碼</h4>';
+    if (totalMonthWash > 0) {
+      var cx = 70, cy = 70, r = 50, circ = 2 * Math.PI * r;
+      var acc = 0;
+      var segments = '';
+      var legend = '';
+      VIP_HALLS.forEach(function(hall) {
+        var w = hallWash[hall.id] || 0;
+        if (w <= 0) return;
+        var len = (w / totalMonthWash) * circ;
+        var fillColor = hall.id === 'lyi' ? 'var(--hall-lyi)' : hall.id === 'yub' ? 'var(--hall-yub)' : hall.id === 'jm1' ? 'var(--hall-jm1)' : 'var(--hall-jm8)';
+        segments += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + fillColor + '" stroke-width="16" ';
+        segments += 'stroke-dasharray="' + len + ' ' + (circ - len) + '" ';
+        segments += 'stroke-dashoffset="' + (-acc) + '" ';
+        segments += 'transform="rotate(-90 ' + cx + ' ' + cy + ')" />';
+        acc += len;
+        var pct = ((w / totalMonthWash) * 100).toFixed(1);
+        legend += '<div class="ov-legend-item"><span class="ov-legend-dot" style="background:' + fillColor + ';"></span><span>' + hall.name + ' ' + pct + '%</span></div>';
+      });
+      html += '<div style="display:flex;align-items:center;gap:16px;">';
+      html += '<svg width="140" height="140" viewBox="0 0 140 140" style="flex-shrink:0;">' + segments + '</svg>';
+      html += '<div class="ov-legend">' + legend + '</div>';
+      html += '</div>';
+      html += '<div class="ov-chart-footer">總計 ' + formatNum(totalMonthWash) + ' 萬</div>';
+    } else {
+      html += '<div class="empty-state" style="padding:32px 0;">本月尚無洗碼記錄</div>';
+    }
+    html += '</div>';
+
+    // 右：各股東洗碼 KPI
+    html += '<div class="ov-chart-card">';
+    html += '<h4 class="ov-chart-title">本月各股東洗碼</h4>';
+    if (shareholders.length > 0 && totalMonthWash > 0) {
+      var shColors = ['var(--hall-lyi)', 'var(--hall-yub)', 'var(--hall-jm1)', 'var(--hall-jm8)', 'var(--accent-light)'];
+      var maxShWash = 0;
+      shareholders.forEach(function(sh) {
+        var pd = calcShareholderProfit(sh, monthTxs, settings, currentMonth);
+        if (pd.personalWash > maxShWash) maxShWash = pd.personalWash;
+      });
+      html += '<div class="ov-sh-bar-list">';
+      shareholders.forEach(function(sh, idx) {
+        var pd = calcShareholderProfit(sh, monthTxs, settings, currentMonth);
+        var barPct = maxShWash > 0 ? (pd.personalWash / maxShWash * 100) : 0;
+        var barColor = shColors[idx % shColors.length];
+        html += '<div class="ov-sh-bar-row">';
+        html += '<span class="ov-sh-bar-name">' + sh.name + '</span>';
+        html += '<div class="ov-sh-bar-track"><div class="ov-sh-bar-fill" style="width:' + barPct + '%;background:' + barColor + ';"></div></div>';
+        html += '<span class="ov-sh-bar-val">' + formatNum(pd.personalWash) + ' 萬</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<div class="empty-state" style="padding:32px 0;">本月尚無洗碼記錄</div>';
+    }
+    html += '</div>';
+
     html += '</div>';
 
     // 活跃团列表
@@ -2119,7 +2197,7 @@ var OverviewPage = (function() {
     if (activeTrips.length === 0) {
       html += '<div class="empty-state">目前無進行中的團</div>';
     } else {
-      html += '<table class="data-table"><thead><tr>';
+      html += '<table class="data-table ov-trips-table"><thead><tr>';
       html += '<th>團ID</th><th>股東</th><th>廳</th><th>成員</th><th>建立日</th><th>操作</th>';
       html += '</tr></thead><tbody>';
       activeTrips.forEach(function(trip) {
@@ -2129,18 +2207,27 @@ var OverviewPage = (function() {
           return h ? h.name : hid;
         }).join(', ');
         html += '<tr>';
-        html += '<td>' + trip.id + '</td>';
+        html += '<td><span class="ov-trip-id">' + trip.id + '</span></td>';
         html += '<td>' + (sh ? sh.name : trip.shareholderId) + '</td>';
-        html += '<td>' + hallName + '</td>';
+        html += '<td><span class="ov-hall-badge">' + hallName + '</span></td>';
         html += '<td>' + (trip.memberIds || []).length + '人</td>';
         html += '<td>' + (trip.startDate || '') + '</td>';
         html += '<td><button class="btn-sm" onclick="OverviewPage.showEditTrip(\'' + trip.id + '\')">編輯</button> ';
         html += '<button class="btn-sm btn-danger" onclick="OverviewPage.deleteTrip(\'' + trip.id + '\')">刪除</button> ';
-        html += '<button class="btn-sm" onclick="Router.go(\'member\');window._selectedTrip=\'' + trip.id + '\'">查看</button></td>';
+        html += '<button class="btn-sm btn-primary" onclick="Router.go(\'member\');window._selectedTrip=\'' + trip.id + '\'">帳務</button></td>';
         html += '</tr>';
       });
       html += '</tbody></table>';
     }
+    html += '</div>';
+
+    // 快捷操作
+    html += '<div class="ov-quick-actions">';
+    html += '<div class="ov-qa-card" onclick="OverviewPage.showCreateTrip()"><div class="ov-qa-icon">' + ICONS.active + '</div><span>建團</span></div>';
+    html += '<div class="ov-qa-card" onclick="Router.go(\'membersMgmt\')"><div class="ov-qa-icon">' + ICONS.member + '</div><span>新增會員</span></div>';
+    html += '<div class="ov-qa-card" onclick="Router.go(\'member\')"><div class="ov-qa-icon">' + ICONS.chart + '</div><span>帳務</span></div>';
+    html += '<div class="ov-qa-card" onclick="Router.go(\'room\')"><div class="ov-qa-icon">' + ICONS.booking + '</div><span>訂房</span></div>';
+    html += '<div class="ov-qa-card" onclick="Router.go(\'shareholder\')"><div class="ov-qa-icon">' + ICONS.shareholder + '</div><span>股東分潤</span></div>';
     html += '</div>';
 
     // 待结帐警示
@@ -2167,9 +2254,20 @@ var OverviewPage = (function() {
     if (container) container.innerHTML = html;
   }
 
-  function kpiCard(label, value, type) {
-    return '<div class="kpi-card kpi-' + type + '"><div class="kpi-label">' + label + '</div><div class="kpi-value">' + value + '</div></div>';
+  function kpiCard(label, value, type, iconSvg) {
+    return '<div class="kpi-card kpi-' + type + '"><div class="kpi-icon">' + iconSvg + '</div><div class="kpi-body"><div class="kpi-value">' + value + '</div><div class="kpi-label">' + label + '</div></div></div>';
   }
+
+  var ICONS = {
+    active: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>',
+    warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    archive: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>',
+    member: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+    agent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    shareholder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>',
+    chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+    booking: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+  };
 
   function formatNum(n) {
     if (n === 0) return '0';
