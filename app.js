@@ -2580,7 +2580,8 @@ var OverviewPage = (function() {
     html += '<div class="form-group"><label>股東(上線)</label>';
     html += '<select id="trip-sh" class="form-input">';
     shareholders.forEach(function(sh) {
-      html += '<option value="' + sh.id + '">' + sh.name + ' (持股:' + sh.shares + ')</option>';
+      var sv = sh.shares || 0;
+      html += '<option value="' + sh.id + '">' + sh.name + ' (持股:' + (sv % 1 === 0 ? sv : sv.toFixed(1)) + ')</option>';
     });
     html += '</select></div>';
     html += '<div class="form-group"><label>貴賓廳</label>';
@@ -2643,7 +2644,8 @@ var OverviewPage = (function() {
     html += '<div class="form-group"><label>股東(上線)</label>';
     html += '<select id="trip-sh-edit" class="form-input">';
     shareholders.forEach(function(sh) {
-      html += '<option value="' + sh.id + '"' + (trip.shareholderId === sh.id ? ' selected' : '') + '>' + sh.name + ' (持股:' + sh.shares + ')</option>';
+      var sv = sh.shares || 0;
+      html += '<option value="' + sh.id + '"' + (trip.shareholderId === sh.id ? ' selected' : '') + '>' + sh.name + ' (持股:' + (sv % 1 === 0 ? sv : sv.toFixed(1)) + ')</option>';
     });
     html += '</select></div>';
     html += '<div class="form-group"><label>貴賓廳</label>';
@@ -5205,7 +5207,8 @@ var ShareholderPage = (function() {
 
         html += '<tr>';
         html += '<td>' + sh.name + '</td>';
-        html += '<td>' + sh.shares + '</td>';
+        var s = sh.shares || 0;
+        html += '<td>' + (s % 1 === 0 ? s : s.toFixed(1)) + '</td>';
         html += '<td>' + fmtWan(profitData.personalWash) + '</td>';
         html += '<td class="num">' + fmtHK(totalData.capital50) + '</td>';
         html += '<td style="text-align:center;">';
@@ -5471,14 +5474,14 @@ var ShareholderPage = (function() {
   // ========== 新增股東 ==========
   function showAdd() {
     var html = '<div class="form-group"><label>股東名稱</label><input type="text" id="sh-name" class="form-input"></div>';
-    html += '<div class="form-group"><label>持股數</label><input type="number" step="1" id="sh-shares" class="form-input" value="1"></div>';
+    html += '<div class="form-group"><label>持股數</label><input type="number" step="0.1" id="sh-shares" class="form-input" value="1"></div>';
     html += '<div style="text-align:right;margin-top:16px;"><button class="btn btn-primary" onclick="ShareholderPage.save()">儲存</button></div>';
     Modal.open('新增股東', html);
   }
 
   function save() {
     var name = document.getElementById('sh-name').value;
-    var shares = parseInt(document.getElementById('sh-shares').value) || 0;
+    var shares = parseFloat(document.getElementById('sh-shares').value) || 0;
     if (!name) { Toast.error('股東名稱必填'); return; }
     Shareholders.create({ name: name, shares: shares });
     Modal.close();
@@ -5490,14 +5493,14 @@ var ShareholderPage = (function() {
     var sh = Shareholders.getById(id);
     if (!sh) return;
     var html = '<div class="form-group"><label>股東名稱</label><input type="text" id="sh-name" class="form-input" value="' + (sh.name || '') + '"></div>';
-    html += '<div class="form-group"><label>持股數</label><input type="number" step="1" id="sh-shares" class="form-input" value="' + (sh.shares || 0) + '"></div>';
+    html += '<div class="form-group"><label>持股數</label><input type="number" step="0.1" id="sh-shares" class="form-input" value="' + (sh.shares || 0) + '"></div>';
     html += '<div style="text-align:right;margin-top:16px;"><button class="btn btn-primary" onclick="ShareholderPage.saveEditShareholder(\'' + id + '\')">儲存</button></div>';
     Modal.open('編輯股東', html);
   }
 
   function saveEditShareholder(id) {
     var name = document.getElementById('sh-name').value;
-    var shares = parseInt(document.getElementById('sh-shares').value) || 0;
+    var shares = parseFloat(document.getElementById('sh-shares').value) || 0;
     if (!name) { Toast.error('股東名稱必填'); return; }
     Shareholders.update(id, { name: name, shares: shares });
     Modal.close();
