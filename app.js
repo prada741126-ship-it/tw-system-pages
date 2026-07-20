@@ -2995,6 +2995,7 @@ var MemberPage = (function() {
       html += '<div class="mb-ap-header">';
       html += '<span class="mb-ap-name">' + agent.name + '</span>';
       html += '<span class="mb-ap-sh">上線: ' + (sh ? sh.name : '-') + '</span>';
+      html += '<button class="btn-sm btn-primary" style="margin-left:auto;" onclick="PdfExport.exportAgent(\'' + _selectedAgent + '\')">匯出PDF</button>';
       html += '</div>';
 
       // 配額條
@@ -3053,7 +3054,7 @@ var MemberPage = (function() {
     } else {
       // 全部代理 — 顯示各代理匯總 + 整體統計
       var agents = Agents.getAll();
-      html += '<div class="mb-ap-header"><span class="mb-ap-name">全部代理</span></div>';
+      html += '<div class="mb-ap-header"><span class="mb-ap-name">全部代理</span><button class="btn-sm btn-primary" style="margin-left:auto;" onclick="PdfExport.exportShareholder()">匯出全部PDF</button></div>';
 
       if (agents.length === 0) {
         html += '<div class="empty-state">無代理資料</div>';
@@ -4893,7 +4894,6 @@ var AgentPage = (function() {
         html += '<div class="agent-card-header">';
         html += '<span class="agent-name">' + agent.name + '</span>';
         html += '<span class="agent-sh">上線: ' + (sh ? sh.name : '-') + '</span>';
-        html += '<button class="btn-sm" onclick="PdfExport.exportAgent(\'' + agent.id + '\')" style="margin-left:auto;">匯出PDF</button>';
         html += '</div>';
 
         // 配额条
