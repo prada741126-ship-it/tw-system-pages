@@ -132,6 +132,8 @@ var EVENTS = {
   SUPPLEMENT_DELETED:  'supplement:deleted',
   SETTINGS_UPDATED:  'settings:updated',
   SETTINGS_LOADED:   'settings:loaded',
+  HOTEL_CONFIG_LOADED:  'hotelConfig:loaded',
+  HOTEL_CONFIG_UPDATED: 'hotelConfig:updated',
   SYNC_START:        'sync:start',
   SYNC_COMPLETE:     'sync:complete',
   SYNC_ERROR:        'sync:error',
@@ -1149,6 +1151,7 @@ function _setupWatchers() {
     { key: 'SUPPLEMENTS',   storeKey: STORAGE_KEYS.SUPPLEMENTS,   event: EVENTS.SYNC_COMPLETE },
     { key: 'SETTINGS',      storeKey: STORAGE_KEYS.SETTINGS,      event: EVENTS.SETTINGS_LOADED },
     { key: 'EXTRA_INCOME',  storeKey: STORAGE_KEYS.EXTRA_INCOME,  event: EVENTS.SYNC_COMPLETE },
+    { key: 'HOTEL_CONFIG',  storeKey: STORAGE_KEYS.HOTEL_CONFIG,  event: EVENTS.HOTEL_CONFIG_LOADED },
   ];
 
   watchList.forEach(function(w) {
@@ -1906,6 +1909,145 @@ var ExtraIncome = (function() {
     enqueue(FB_PATH.EXTRA_INCOME, obj);
   }
   return { load: load, save: save, getAll: getAll, getByMonth: getByMonth, create: create, update: update, remove: remove };
+})();
+
+
+// === src/data/hotelConfig.js ===
+/**
+ * data/hotelConfig.js — 酒店配置 CRUD
+ * 可線上編輯酒店門檻數，取代硬編碼 PRESET_HOTEL_CONFIG
+ * 初始載入時若 localStorage 為空，自動匯入 PRESET_HOTEL_CONFIG 作為預設值
+ */
+var HotelConfig = (function() {
+  function load() {
+    var arr = Store.readArray(STORAGE_KEYS.HOTEL_CONFIG);
+    /* 首次載入：若 localStorage 無資料，用 PRESET_HOTEL_CONFIG 初始化 */
+    if (!arr || arr.length === 0) {
+      arr = seedFromPreset();
+      Store.writeArray(STORAGE_KEYS.HOTEL_CONFIG, arr);
+    }
+    State.set('hotelConfig', arr);
+    return arr;
+  }
+
+  function seedFromPreset() {
+    var now = Date.now();
+    return PRESET_HOTEL_CONFIG.map(function(h, i) {
+      return {
+        id: 'HC' + now + '_' + i,
+        casino: h.casino,
+        hotel: h.hotel,
+        code: h.code,
+        room: h.room,
+        threshold: h.threshold,
+        _fbKey: 'hc_' + now + '_' + i,
+        _updatedAt: now,
+      };
+    });
+  }
+
+  function save(arr) {
+    Store.writeArray(STORAGE_KEYS.HOTEL_CONFIG, arr);
+    State.set('hotelConfig', arr);
+  }
+
+  function getAll() {
+    return (State.get('hotelConfig') || []).filter(function(h) { return !h._deleted; });
+  }
+
+  function getById(id) {
+    return getAll().find(function(h) { return h.id === id; });
+  }
+
+  /* 取所有體系（去重，按 CASINO_ORDER 排序） */
+  function getCasinos() {
+    var all = getAll();
+    var set = {};
+    all.forEach(function(h) { set[h.casino] = true; });
+    /* 按 CASINO_ORDER 排序，不在 ORDER 中的排最後 */
+    var result = [];
+    CASINO_ORDER.forEach(function(c) { if (set[c]) { result.push(c); delete set[c]; } });
+    /* 加入不在 CASINO_ORDER 中的自定義體系 */
+    Object.keys(set).forEach(function(c) { result.push(c); });
+    return result;
+  }
+
+  /* 取指定體系下的酒店（去重） */
+  function getHotels(casino) {
+    var all = getAll().filter(function(h) { return h.casino === casino; });
+    var seen = {};
+    var result = [];
+    all.forEach(function(h) {
+      if (!seen[h.hotel]) { seen[h.hotel] = true; result.push(h.hotel); }
+    });
+    return result;
+  }
+
+  /* 取指定體系+酒店下的房型列表 */
+  function getRooms(casino, hotel) {
+    return getAll().filter(function(h) { return h.casino === casino && h.hotel === hotel; });
+  }
+
+  function getByCasino(casino) {
+    return getAll().filter(function(h) { return h.casino === casino; });
+  }
+
+  function getByHotel(casino, hotel) {
+    return getAll().filter(function(h) { return h.casino === casino && h.hotel === hotel; });
+  }
+
+  function create(data) {
+    var now = Date.now();
+    var item = {
+      id: data.id || ('HC' + now),
+      casino: data.casino || '',
+      hotel: data.hotel || '',
+      code: data.code || '',
+      room: data.room || '',
+      threshold: data.threshold || 0,
+      _fbKey: 'hc_' + (data.id || now),
+      _updatedAt: now,
+    };
+    var arr = State.get('hotelConfig') || [];
+    arr.push(item);
+    save(arr);
+    var obj = {}; obj[item._fbKey] = item;
+    enqueue(FB_PATH.HOTEL_CONFIG, obj);
+    EventBus.emit(EVENTS.HOTEL_CONFIG_UPDATED, item);
+    return item;
+  }
+
+  function update(id, patch) {
+    var arr = State.get('hotelConfig') || [];
+    var idx = arr.findIndex(function(h) { return h.id === id; });
+    if (idx < 0) return null;
+    Object.assign(arr[idx], patch, { _updatedAt: Date.now() });
+    save(arr);
+    var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
+    enqueue(FB_PATH.HOTEL_CONFIG, obj);
+    EventBus.emit(EVENTS.HOTEL_CONFIG_UPDATED, arr[idx]);
+    return arr[idx];
+  }
+
+  function remove(id) {
+    var arr = State.get('hotelConfig') || [];
+    var idx = arr.findIndex(function(h) { return h.id === id; });
+    if (idx < 0) return;
+    arr[idx]._deleted = true;
+    arr[idx]._updatedAt = Date.now();
+    save(arr);
+    var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
+    enqueue(FB_PATH.HOTEL_CONFIG, obj);
+    EventBus.emit(EVENTS.HOTEL_CONFIG_UPDATED, id);
+  }
+
+  return {
+    load: load, save: save,
+    getAll: getAll, getById: getById,
+    getCasinos: getCasinos, getHotels: getHotels, getRooms: getRooms,
+    getByCasino: getByCasino, getByHotel: getByHotel,
+    create: create, update: update, remove: remove,
+  };
 })();
 
 
@@ -3528,6 +3670,7 @@ var RoomPage = (function() {
       html += '<option value="' + trip.id + '"' + (_selectedTrip === trip.id ? ' selected' : '') + '>' + trip.id + ' - ' + (sh ? sh.name : '') + '</option>';
     });
     html += '</select>';
+    html += '<button class="btn" style="background:var(--bg-tertiary);color:var(--text-primary);" onclick="RoomPage.showHotelConfig()">\u2699\uFE0F 酒店設定</button>';
     if (_selectedTrip) {
       html += '<button class="btn btn-primary" onclick="RoomPage.showAddBooking()">+ 新增訂房</button>';
       html += '<button class="btn" style="background:var(--accent);color:#fff;" onclick="RoomPage.toggleFeePanel()">' + (_showFeePanel ? '收起費用' : '費用收取') + '</button>';
@@ -3846,7 +3989,7 @@ var RoomPage = (function() {
     html += '<div class="form-group"><label>體系</label>';
     html += '<select id="bk-casino" class="form-input" onchange="RoomPage.onCasinoChange()">';
     html += '<option value="">選擇...</option>';
-    CASINO_ORDER.forEach(function(c) { html += '<option value="' + c + '">' + c + '</option>'; });
+    HotelConfig.getCasinos().forEach(function(c) { html += '<option value="' + c + '">' + c + '</option>'; });
     html += '</select></div>';
     html += '<div class="form-group"><label>酒店</label>';
     html += '<select id="bk-hotel" class="form-input" onchange="RoomPage.onHotelChange()"><option value="">先選體系</option></select></div>';
@@ -3872,7 +4015,7 @@ var RoomPage = (function() {
 
   function onCasinoChange() {
     var casino = document.getElementById('bk-casino').value;
-    var hotels = [...new Set(PRESET_HOTEL_CONFIG.filter(function(h) { return h.casino === casino; }).map(function(h) { return h.hotel; }))];
+    var hotels = HotelConfig.getHotels(casino);
     var select = document.getElementById('bk-hotel');
     select.innerHTML = '<option value="">選擇...</option>' + hotels.map(function(h) { return '<option value="' + h + '">' + h + '</option>'; }).join('');
     document.getElementById('bk-room').innerHTML = '<option value="">先選酒店</option>';
@@ -3881,7 +4024,7 @@ var RoomPage = (function() {
   function onHotelChange() {
     var casino = document.getElementById('bk-casino').value;
     var hotel = document.getElementById('bk-hotel').value;
-    var rooms = PRESET_HOTEL_CONFIG.filter(function(h) { return h.casino === casino && h.hotel === hotel; });
+    var rooms = HotelConfig.getRooms(casino, hotel);
     var select = document.getElementById('bk-room');
     select.innerHTML = '<option value="">選擇...</option>' + rooms.map(function(r) {
       return '<option value="' + r.code + '" data-threshold="' + r.threshold + '">' + r.room + ' (' + (r.threshold / 10000) + '萬)</option>';
@@ -4253,6 +4396,107 @@ var RoomPage = (function() {
     return html;
   }
 
+  /* ===== 酒店設定 Modal ===== */
+  function showHotelConfig() {
+    var html = '';
+    html += '<div style="max-height:70vh;overflow-y:auto;">';
+
+    /* 按體系分組顯示 */
+    var casinos = HotelConfig.getCasinos();
+    casinos.forEach(function(casino) {
+      var hotels = HotelConfig.getHotels(casino);
+      html += '<div style="margin-bottom:16px;">';
+      html += '<h4 style="color:var(--accent);margin:8px 0 4px;font-size:var(--font-size-base);">\u25C6 ' + escHtml(casino) + '</h4>';
+
+      hotels.forEach(function(hotelName) {
+        var rooms = HotelConfig.getRooms(casino, hotelName);
+        html += '<div style="margin-left:12px;margin-bottom:8px;">';
+        html += '<div style="font-weight:600;margin:4px 0;color:var(--text-primary);">' + escHtml(hotelName) + '</div>';
+        html += '<table class="data-table" style="font-size:var(--font-size-sm);"><thead><tr>';
+        html += '<th>房型</th><th>代碼</th><th class="num">門檻(萬)</th><th>操作</th>';
+        html += '</tr></thead><tbody>';
+        rooms.forEach(function(r) {
+          html += '<tr>';
+          html += '<td>' + escHtml(r.room) + '</td>';
+          html += '<td>' + escHtml(r.code) + '</td>';
+          html += '<td class="num"><input type="number" id="hc-th-' + r.id + '" class="form-input" style="width:100px;text-align:right;" value="' + (r.threshold / 10000) + '" step="1" min="0" onchange="RoomPage.saveHotelThreshold(\'' + r.id + '\')"></td>';
+          html += '<td><button class="btn-sm btn-danger" onclick="RoomPage.delHotelConfig(\'' + r.id + '\')">刪</button></td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+        html += '</div>';
+      });
+
+      html += '</div>';
+    });
+
+    html += '</div>';
+
+    /* 新增配置區 */
+    html += '<div style="border-top:2px solid var(--border);padding-top:12px;margin-top:8px;">';
+    html += '<h4 style="margin:0 0 8px;">\u2795 新增酒店配置</h4>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>體系</label><input type="text" id="hc-new-casino" class="form-input" placeholder="如: 金沙" list="hc-casino-list"></div>';
+    html += '<div class="form-group"><label>酒店</label><input type="text" id="hc-new-hotel" class="form-input" placeholder="如: 倫敦人"></div>';
+    html += '</div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>房型</label><input type="text" id="hc-new-room" class="form-input" placeholder="如: 名匯普通房"></div>';
+    html += '<div class="form-group"><label>代碼</label><input type="text" id="hc-new-code" class="form-input" placeholder="如: RK"></div>';
+    html += '<div class="form-group"><label>門檻(萬)</label><input type="number" id="hc-new-threshold" class="form-input" placeholder="如: 60" step="1" min="0"></div>';
+    html += '</div>';
+    html += '<datalist id="hc-casino-list">';
+    casinos.forEach(function(c) { html += '<option value="' + escHtml(c) + '">'; });
+    html += '</datalist>';
+    html += '<div style="text-align:right;margin-top:8px;">';
+    html += '<button class="btn btn-primary" onclick="RoomPage.saveNewHotelConfig()">新增</button>';
+    html += '</div>';
+    html += '</div>';
+
+    Modal.open('酒店設定 — 門檻管理', html);
+  }
+
+  function saveHotelThreshold(id) {
+    var input = document.getElementById('hc-th-' + id);
+    if (!input) return;
+    var wan = parseFloat(input.value) || 0;
+    var threshold = Math.round(wan * 10000);
+    HotelConfig.update(id, { threshold: threshold });
+    Toast.success('門檻已更新: ' + wan + '萬');
+  }
+
+  function saveNewHotelConfig() {
+    var casino = document.getElementById('hc-new-casino').value.trim();
+    var hotel = document.getElementById('hc-new-hotel').value.trim();
+    var room = document.getElementById('hc-new-room').value.trim();
+    var code = document.getElementById('hc-new-code').value.trim();
+    var wan = parseFloat(document.getElementById('hc-new-threshold').value) || 0;
+
+    if (!casino || !hotel || !room) {
+      Toast.warning('請填寫體系、酒店、房型');
+      return;
+    }
+
+    HotelConfig.create({
+      casino: casino,
+      hotel: hotel,
+      room: room,
+      code: code,
+      threshold: Math.round(wan * 10000),
+    });
+    Toast.success('已新增: ' + casino + ' / ' + hotel + ' / ' + room);
+    showHotelConfig(); /* 重新渲染 Modal */
+  }
+
+  function delHotelConfig(id) {
+    var item = HotelConfig.getById(id);
+    if (!item) return;
+    Modal.confirm('確定刪除「' + item.casino + ' / ' + item.hotel + ' / ' + item.room + '」？', function() {
+      HotelConfig.remove(id);
+      Toast.success('已刪除');
+      showHotelConfig(); /* 重新渲染 Modal */
+    });
+  }
+
   return {
     render: render, selectTrip: selectTrip,
     showAddBooking: showAddBooking, onCasinoChange: onCasinoChange, onHotelChange: onHotelChange,
@@ -4261,6 +4505,8 @@ var RoomPage = (function() {
     goFees: goFees, goProfit: goProfit,
     toggleFeePanel: toggleFeePanel, cycleFeeType: cycleFeeType, setFeeMode: setFeeMode,
     pushExpenseToMember: pushExpenseToMember,
+    showHotelConfig: showHotelConfig, saveHotelThreshold: saveHotelThreshold,
+    saveNewHotelConfig: saveNewHotelConfig, delHotelConfig: delHotelConfig,
   };
 })();
 
@@ -6105,6 +6351,7 @@ function exposeGlobals() {
   window.Supplements = Supplements;
   window.Settings = Settings;
   window.ExtraIncome = ExtraIncome;
+  window.HotelConfig = HotelConfig;
   // UI
   window.Toast = Toast;
   window.Modal = Modal;
@@ -6167,6 +6414,7 @@ function loadAllData() {
   Supplements.load();
   Settings.load();
   ExtraIncome.load();
+  HotelConfig.load();
   RecentlyDeleted.init();
 }
 
@@ -6196,6 +6444,7 @@ function initApp() {
         SUPPLEMENTS: State.get('supplements'),
         SETTINGS: State.get('settings'),
         EXTRA_INCOME: State.get('extraIncome'),
+        HOTEL_CONFIG: State.get('hotelConfig'),
       });
     } else {
       console.warn('[App] Firebase 未连接，离线模式');
