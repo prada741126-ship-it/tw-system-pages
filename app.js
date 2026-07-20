@@ -2077,6 +2077,276 @@ var Paginator = (function() {
 })();
 
 
+// === src/ui/pdfExport.js ===
+/**
+ * ui/pdfExport.js — PDF 匯出模組
+ * 將代理/股東的洗碼明細+房間記錄匯出為 PDF 檔
+ * 依賴: html2pdf.js (CDN defer), data/*, ui/toast.js
+ */
+var PdfExport = (function() {
+
+  function fmtNum(n) {
+    return Math.round(n).toLocaleString();
+  }
+
+  function fmtDec(n) {
+    return Math.round(n * 100) / 100;
+  }
+
+  function feeLabel(feeType) {
+    switch (feeType) {
+      case 'free': return '免費';
+      case 'paid': return '收費';
+      case 'discount': return '折扣';
+      default: return '自動';
+    }
+  }
+
+  function buildHeader(title, subtitle) {
+    var now = new Date();
+    var mm = String(now.getMonth() + 1);
+    if (mm.length < 2) mm = '0' + mm;
+    var dd = String(now.getDate());
+    if (dd.length < 2) dd = '0' + dd;
+    var dateStr = now.getFullYear() + '/' + mm + '/' + dd;
+
+    var html = '';
+    html += '<div style="text-align:center;margin-bottom:20px;padding-bottom:10px;border-bottom:2px solid #333;">';
+    html += '<div style="font-size:20px;font-weight:bold;margin-bottom:4px;">博盈國際會 — 台灣版</div>';
+    html += '<div style="font-size:16px;margin-bottom:4px;">' + title + '</div>';
+    if (subtitle) html += '<div style="font-size:12px;color:#666;margin-bottom:2px;">' + subtitle + '</div>';
+    html += '<div style="font-size:11px;color:#999;">匯出日期：' + dateStr + '</div>';
+    html += '</div>';
+    return html;
+  }
+
+  function buildWashTable(txs) {
+    var halls = Settings.getVipHalls();
+    var html = '';
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-size:14px;font-weight:bold;margin-bottom:6px;">洗碼明細</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11px;">';
+    html += '<thead><tr style="background:#e8e8e8;">';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:left;">會員</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:center;">廳</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">出碼</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">回碼</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">洗碼量</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">退傭</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">開銷(NT)</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">交收(NT)</th>';
+    html += '</tr></thead><tbody>';
+
+    var sumWash = 0, sumComm = 0, sumExp = 0, sumSettle = 0;
+
+    txs.forEach(function(tx) {
+      var m = Members.getById(tx.memberId);
+      var hall = halls.find(function(h) { return h.id === tx.vipHallId; });
+      var hallName = hall ? hall.name : (tx.vipHallId || '-');
+      var comm = (tx.commission1 || 0) + (tx.commission2 || 0);
+      var settleNT = Math.round((tx.totalSettlement || 0) * 10000);
+
+      sumWash += (tx.washCode || 0);
+      sumComm += comm;
+      sumExp += (tx.expensesNT || 0);
+      sumSettle += settleNT;
+
+      html += '<tr>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;">' + (m ? m.name : tx.memberId) + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:center;">' + hallName + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + (tx.outCode || 0) + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + (tx.backCode || 0) + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + (tx.washCode || 0) + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtDec(comm) + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtNum(tx.expensesNT || 0) + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtNum(settleNT) + '</td>';
+      html += '</tr>';
+    });
+
+    /* 小計行 */
+    html += '<tr style="background:#f0f0f0;font-weight:bold;">';
+    html += '<td style="border:1px solid #bbb;padding:4px 6px;" colspan="4">小計</td>';
+    html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtDec(sumWash) + '</td>';
+    html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtDec(sumComm) + '</td>';
+    html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtNum(sumExp) + '</td>';
+    html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtNum(sumSettle) + '</td>';
+    html += '</tr>';
+
+    html += '</tbody></table>';
+    html += '</div>';
+    return html;
+  }
+
+  function buildRoomTable(bookings) {
+    var html = '';
+    html += '<div style="margin-bottom:16px;">';
+    html += '<div style="font-size:14px;font-weight:bold;margin-bottom:6px;">房間記錄</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11px;">';
+    html += '<thead><tr style="background:#e8e8e8;">';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:left;">客人</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;">酒店</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;">房型</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;">入住</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;">退房</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:center;">晚</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">門檻(萬)</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">房費</th>';
+    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:center;">狀態</th>';
+    html += '</tr></thead><tbody>';
+
+    var sumCharge = 0;
+
+    bookings.forEach(function(b) {
+      var charge = b.chargeGuest || 0;
+      sumCharge += charge;
+
+      html += '<tr>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;">' + (b.guestName || '-') + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;">' + (b.hotel || '-') + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;">' + (b.roomType || '-') + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:center;">' + (b.checkIn || '-') + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:center;">' + (b.checkOut || '-') + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:center;">' + (b.nights || 1) + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + ((b.threshold || 0) / 10000).toFixed(0) + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + (charge > 0 ? fmtNum(charge) : '-') + '</td>';
+      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:center;">' + feeLabel(b.feeType) + '</td>';
+      html += '</tr>';
+    });
+
+    /* 小計行 */
+    html += '<tr style="background:#f0f0f0;font-weight:bold;">';
+    html += '<td style="border:1px solid #bbb;padding:4px 6px;" colspan="7">小計</td>';
+    html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtNum(sumCharge) + '</td>';
+    html += '<td style="border:1px solid #bbb;padding:4px 6px;"></td>';
+    html += '</tr>';
+
+    html += '</tbody></table>';
+    html += '</div>';
+    return html;
+  }
+
+  function buildAgentSection(agent, txs, bookings, pageBreak) {
+    var cls = pageBreak ? ' class="pdf-page-break"' : '';
+    var breakStyle = pageBreak ? 'page-break-before:always;' : '';
+    var html = '';
+    html += '<div' + cls + ' style="' + breakStyle + 'margin-bottom:20px;">';
+    html += '<div style="font-size:16px;font-weight:bold;margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid #999;">代理：' + agent.name + '</div>';
+
+    if (txs.length > 0) {
+      html += buildWashTable(txs);
+    } else {
+      html += '<div style="font-size:12px;color:#999;margin-bottom:12px;">無洗碼記錄</div>';
+    }
+
+    if (bookings.length > 0) {
+      html += buildRoomTable(bookings);
+    } else {
+      html += '<div style="font-size:12px;color:#999;margin-bottom:12px;">無房間記錄</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  function generatePDF(htmlContent, filename) {
+    if (typeof html2pdf === 'undefined') {
+      Toast.error('PDF 庫未載入，請檢查網路連線後重試');
+      return;
+    }
+
+    /* 清理舊的匯出容器 */
+    var old = document.getElementById('pdf-export-container');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+
+    /* 建立離屏容器（visible 但在螢幕外） */
+    var container = document.createElement('div');
+    container.id = 'pdf-export-container';
+    container.style.cssText = 'position:absolute;left:-9999px;top:0;width:1120px;background:#ffffff;padding:20px;';
+    container.innerHTML = htmlContent;
+    document.body.appendChild(container);
+
+    var opt = {
+      margin: [10, 10, 10, 10],
+      filename: filename + '.pdf',
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 1200 },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
+      pagebreak: { mode: ['css', 'legacy'], before: '.pdf-page-break' },
+    };
+
+    Toast.info('正在生成 PDF，請稍候...');
+
+    html2pdf().set(opt).from(container).save().then(function() {
+      if (container.parentNode) container.parentNode.removeChild(container);
+      Toast.success('PDF 已下載');
+    }).catch(function() {
+      if (container.parentNode) container.parentNode.removeChild(container);
+      Toast.error('PDF 生成失敗');
+    });
+  }
+
+  /* === 代理 PDF：只匯出該代理的洗碼明細+房間記錄 === */
+  function exportAgent(agentId) {
+    var agent = Agents.getById(agentId);
+    if (!agent) { Toast.error('找不到代理'); return; }
+
+    var mtxs = MemberTxs.getAll().filter(function(t) { return t.agentId === agentId; });
+    var bookings = Bookings.getByAgent(agentId);
+
+    if (mtxs.length === 0 && bookings.length === 0) {
+      Toast.warning('此代理無洗碼及房間記錄');
+      return;
+    }
+
+    var sh = Shareholders.getById(agent.shareholderId);
+    var subtitle = sh ? ('上線股東：' + sh.name) : '';
+
+    var html = '';
+    html += buildHeader('代理：' + agent.name, subtitle);
+    html += buildAgentSection(agent, mtxs, bookings, false);
+
+    generatePDF(html, '代理_' + agent.name + '_明細');
+  }
+
+  /* === 股東 PDF：全部代理，按代理分組+分頁+小計 === */
+  function exportShareholder() {
+    var agents = Agents.getAll();
+    if (agents.length === 0) { Toast.error('無代理資料'); return; }
+
+    var mtxs = MemberTxs.getAll();
+    var bookings = Bookings.getAll();
+
+    var hasData = agents.some(function(a) {
+      return mtxs.some(function(t) { return t.agentId === a.id; }) ||
+             bookings.some(function(b) { return b.agentId === a.id; });
+    });
+    if (!hasData) {
+      Toast.warning('所有代理均無記錄');
+      return;
+    }
+
+    var html = '';
+    html += buildHeader('股東全覽 — 全部代理明細', '共 ' + agents.length + ' 位代理');
+
+    var isFirst = true;
+    agents.forEach(function(agent) {
+      var agentTxs = mtxs.filter(function(t) { return t.agentId === agent.id; });
+      var agentBookings = bookings.filter(function(b) { return b.agentId === agent.id; });
+      if (agentTxs.length === 0 && agentBookings.length === 0) return;
+      html += buildAgentSection(agent, agentTxs, agentBookings, !isFirst);
+      isFirst = false;
+    });
+
+    generatePDF(html, '股東全覽_全部代理明細');
+  }
+
+  return {
+    exportAgent: exportAgent,
+    exportShareholder: exportShareholder,
+  };
+})();
+
+
 // === src/pages/overview.js ===
 /**
  * pages/overview.js — 总览页
@@ -4623,6 +4893,7 @@ var AgentPage = (function() {
         html += '<div class="agent-card-header">';
         html += '<span class="agent-name">' + agent.name + '</span>';
         html += '<span class="agent-sh">上線: ' + (sh ? sh.name : '-') + '</span>';
+        html += '<button class="btn-sm" onclick="PdfExport.exportAgent(\'' + agent.id + '\')" style="margin-left:auto;">匯出PDF</button>';
         html += '</div>';
 
         // 配额条
@@ -4869,7 +5140,10 @@ var ShareholderPage = (function() {
     html += '<div class="sh-card">';
     html += '<div class="sh-card-header">';
     html += '<h3 class="sh-section-title">分潤明細</h3>';
+    html += '<div>';
+    html += '<button class="btn-sm" onclick="PdfExport.exportShareholder()">匯出全部PDF</button> ';
     html += '<button class="btn btn-primary btn-sm" onclick="ShareholderPage.showAdd()">+ 新增股東</button>';
+    html += '</div>';
     html += '</div>';
 
     // 匯率藥丸
@@ -5793,6 +6067,7 @@ function exposeGlobals() {
   window.Modal = Modal;
   window.Keyboard = Keyboard;
   window.Paginator = Paginator;
+  window.PdfExport = PdfExport;
   // Pages
   window.OverviewPage = OverviewPage;
   window.PendingPage = PendingPage;
