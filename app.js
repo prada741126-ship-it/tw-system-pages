@@ -2993,6 +2993,17 @@ var MemberPage = (function() {
     if (ap) ap.showAdd();
   }
 
+  // 刪除代理
+  function delAgent(id) {
+    var agent = Agents.getById(id);
+    if (!agent) return;
+    if (!confirm('確定刪除代理「' + agent.name + '」？此操作不可復原。')) return;
+    Agents.remove(id);
+    _selectedAgent = null;
+    Toast.success('代理已刪除');
+    render();
+  }
+
   // 客名遮罩（保護客戶資料）
   function maskName(name) {
     if (!name) return '';
@@ -3025,6 +3036,7 @@ var MemberPage = (function() {
       html += '<span class="mb-ap-name">' + agent.name + '</span>';
       html += '<span class="mb-ap-sh">上線: ' + (sh ? sh.name : '-') + '</span>';
       html += '<button class="btn-sm btn-primary" style="margin-left:auto;" onclick="PdfExport.exportAgent(\'' + _selectedAgent + '\', \'' + _selectedTrip + '\')">匯出PDF</button>';
+      html += '<button class="btn-sm btn-danger" onclick="MemberPage.delAgent(\'' + _selectedAgent + '\')">刪除</button>';
       html += '</div>';
 
       // 配額條
@@ -3436,7 +3448,7 @@ var MemberPage = (function() {
 
   return {
     render: render, selectTrip: selectTrip, selectAgent: selectAgent,
-    showAddTx: showAddTx, saveTx: saveTx, onMemberChange: onMemberChange, showAddAgent: showAddAgent,
+    showAddTx: showAddTx, saveTx: saveTx, onMemberChange: onMemberChange, showAddAgent: showAddAgent, delAgent: delAgent,
     editTx: editTx, saveEditTx: saveEditTx, delTx: delTx,
     addExpenseRow: addExpenseRow, _updExp: _updExp, _updExpType: _updExpType, _delExp: _delExp,
     calcUpDown: calcUpDown, calcWash: calcWash,
