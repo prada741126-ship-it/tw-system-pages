@@ -2120,7 +2120,7 @@ var PdfExport = (function() {
     return html;
   }
 
-  function buildWashTable(txs) {
+  function buildWashTable(txs, defaultHallId) {
     var halls = Settings.getVipHalls();
     var html = '';
     html += '<div style="margin-bottom:16px;">';
@@ -2141,8 +2141,9 @@ var PdfExport = (function() {
 
     txs.forEach(function(tx) {
       var m = Members.getById(tx.memberId);
-      var hall = halls.find(function(h) { return h.id === tx.vipHallId; });
-      var hallName = hall ? hall.name : (tx.vipHallId || '-');
+      var hid = defaultHallId || tx.vipHallId;
+      var hall = halls.find(function(h) { return h.id === hid; });
+      var hallName = hall ? hall.name : (hid || '-');
       var comm = (tx.commission1 || 0) + (tx.commission2 || 0);
       var settleNT = Math.round((tx.totalSettlement || 0) * 10000);
 
@@ -2225,7 +2226,7 @@ var PdfExport = (function() {
     return html;
   }
 
-  function buildAgentSection(agent, txs, bookings, pageBreak) {
+  function buildAgentSection(agent, txs, bookings, pageBreak, defaultHallId) {
     var cls = pageBreak ? ' class="pdf-page-break"' : '';
     var breakStyle = pageBreak ? 'page-break-before:always;' : '';
     var html = '';
@@ -2233,7 +2234,7 @@ var PdfExport = (function() {
     html += '<div style="font-size:16px;font-weight:bold;margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid #999;">代理：' + agent.name + '</div>';
 
     if (txs.length > 0) {
-      html += buildWashTable(txs);
+      html += buildWashTable(txs, defaultHallId);
     } else {
       html += '<div style="font-size:12px;color:#999;margin-bottom:12px;">無洗碼記錄</div>';
     }
@@ -2285,13 +2286,21 @@ var PdfExport = (function() {
     });
   }
 
-  /* === 代理 PDF：只匯出該代理的洗碼明細+房間記錄 === */
-  function exportAgent(agentId) {
+  /* === 代理 PDF：只匯出該代理的洗碼明細+房間記錄（限指定團） === */
+  function exportAgent(agentId, tripId) {
     var agent = Agents.getById(agentId);
     if (!agent) { Toast.error('找不到代理'); return; }
 
-    var mtxs = MemberTxs.getAll().filter(function(t) { return t.agentId === agentId; });
-    var bookings = Bookings.getByAgent(agentId);
+    var mtxs, bookings, defaultHallId = '';
+    if (tripId) {
+      var trip = Trips.getById(tripId);
+      mtxs = MemberTxs.getByTrip(tripId).filter(function(t) { return t.agentId === agentId; });
+      bookings = Bookings.getByTrip(tripId).filter(function(b) { return b.agentId === agentId; });
+      if (trip && trip.hallIds && trip.hallIds[0]) defaultHallId = trip.hallIds[0];
+    } else {
+      mtxs = MemberTxs.getAll().filter(function(t) { return t.agentId === agentId; });
+      bookings = Bookings.getByAgent(agentId);
+    }
 
     if (mtxs.length === 0 && bookings.length === 0) {
       Toast.warning('此代理無洗碼及房間記錄');
@@ -2300,21 +2309,33 @@ var PdfExport = (function() {
 
     var sh = Shareholders.getById(agent.shareholderId);
     var subtitle = sh ? ('上線股東：' + sh.name) : '';
+    if (tripId) {
+      var tripObj = Trips.getById(tripId);
+      if (tripObj) subtitle = (subtitle ? subtitle + ' · ' : '') + '團：' + tripObj.id;
+    }
 
     var html = '';
     html += buildHeader('代理：' + agent.name, subtitle);
-    html += buildAgentSection(agent, mtxs, bookings, false);
+    html += buildAgentSection(agent, mtxs, bookings, false, defaultHallId);
 
     generatePDF(html, '代理_' + agent.name + '_明細');
   }
 
-  /* === 股東 PDF：全部代理，按代理分組+分頁+小計 === */
-  function exportShareholder() {
+  /* === 股東 PDF：全部代理，按代理分組+分頁+小計（限指定團） === */
+  function exportShareholder(tripId) {
     var agents = Agents.getAll();
     if (agents.length === 0) { Toast.error('無代理資料'); return; }
 
-    var mtxs = MemberTxs.getAll();
-    var bookings = Bookings.getAll();
+    var mtxs, bookings, defaultHallId = '';
+    if (tripId) {
+      var trip = Trips.getById(tripId);
+      mtxs = MemberTxs.getByTrip(tripId);
+      bookings = Bookings.getByTrip(tripId);
+      if (trip && trip.hallIds && trip.hallIds[0]) defaultHallId = trip.hallIds[0];
+    } else {
+      mtxs = MemberTxs.getAll();
+      bookings = Bookings.getAll();
+    }
 
     var hasData = agents.some(function(a) {
       return mtxs.some(function(t) { return t.agentId === a.id; }) ||
@@ -2325,15 +2346,21 @@ var PdfExport = (function() {
       return;
     }
 
+    var subtitle = '共 ' + agents.length + ' 位代理';
+    if (tripId) {
+      var tripObj = Trips.getById(tripId);
+      if (tripObj) subtitle += ' · 團：' + tripObj.id;
+    }
+
     var html = '';
-    html += buildHeader('股東全覽 — 全部代理明細', '共 ' + agents.length + ' 位代理');
+    html += buildHeader('股東全覽 — 全部代理明細', subtitle);
 
     var isFirst = true;
     agents.forEach(function(agent) {
       var agentTxs = mtxs.filter(function(t) { return t.agentId === agent.id; });
       var agentBookings = bookings.filter(function(b) { return b.agentId === agent.id; });
       if (agentTxs.length === 0 && agentBookings.length === 0) return;
-      html += buildAgentSection(agent, agentTxs, agentBookings, !isFirst);
+      html += buildAgentSection(agent, agentTxs, agentBookings, !isFirst, defaultHallId);
       isFirst = false;
     });
 
@@ -2995,7 +3022,7 @@ var MemberPage = (function() {
       html += '<div class="mb-ap-header">';
       html += '<span class="mb-ap-name">' + agent.name + '</span>';
       html += '<span class="mb-ap-sh">上線: ' + (sh ? sh.name : '-') + '</span>';
-      html += '<button class="btn-sm btn-primary" style="margin-left:auto;" onclick="PdfExport.exportAgent(\'' + _selectedAgent + '\')">匯出PDF</button>';
+      html += '<button class="btn-sm btn-primary" style="margin-left:auto;" onclick="PdfExport.exportAgent(\'' + _selectedAgent + '\', \'' + _selectedTrip + '\')">匯出PDF</button>';
       html += '</div>';
 
       // 配額條
@@ -3054,7 +3081,7 @@ var MemberPage = (function() {
     } else {
       // 全部代理 — 顯示各代理匯總 + 整體統計
       var agents = Agents.getAll();
-      html += '<div class="mb-ap-header"><span class="mb-ap-name">全部代理</span><button class="btn-sm btn-primary" style="margin-left:auto;" onclick="PdfExport.exportShareholder()">匯出全部PDF</button></div>';
+      html += '<div class="mb-ap-header"><span class="mb-ap-name">全部代理</span><button class="btn-sm btn-primary" style="margin-left:auto;" onclick="PdfExport.exportShareholder(\'' + _selectedTrip + '\')">匯出全部PDF</button></div>';
 
       if (agents.length === 0) {
         html += '<div class="empty-state">無代理資料</div>';
