@@ -3122,7 +3122,7 @@ var MemberPage = (function() {
 
         // 各代理匯總表
         html += '<table class="mb-ap-table"><thead><tr>';
-        html += '<th>代理</th><th class="num">洗碼</th><th class="num">交收</th>';
+        html += '<th>代理</th><th class="num">洗碼</th><th class="num">交收</th><th style="text-align:center;">操作</th>';
         html += '</tr></thead><tbody>';
         var grandWash = 0, grandSettle = 0;
         agents.forEach(function(ag) {
@@ -3131,10 +3131,11 @@ var MemberPage = (function() {
           var agSettle = agTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
           grandWash += agWash;
           grandSettle += agSettle;
-          html += '<tr style="cursor:pointer;" onclick="MemberPage.selectAgent(\'' + ag.id + '\')">';
-          html += '<td>' + ag.name + '</td>';
+          html += '<tr>';
+          html += '<td><a href="javascript:void(0)" onclick="MemberPage.selectAgent(\'' + ag.id + '\')" style="color:var(--accent);text-decoration:underline;">' + ag.name + '</a></td>';
           html += '<td class="num">' + fmtCardNum(agWash) + '</td>';
           html += '<td class="num ' + (agSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.round(agSettle)) + '</td>';
+          html += '<td style="text-align:center;"><button class="btn-sm btn-danger" onclick="MemberPage.delAgent(\'' + ag.id + '\')">刪除</button></td>';
           html += '</tr>';
         });
         html += '<tr class="total-row">';
