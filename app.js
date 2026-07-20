@@ -2945,27 +2945,32 @@ var MemberPage = (function() {
     var html = '';
     _expenseRows.forEach(function(row, i) {
       html += '<div class="form-row expense-row" data-idx="' + i + '">';
-      html += '<select class="form-input" style="flex:1;min-width:100px;" onchange="MemberPage._updExpType(' + i + ',this.value)">';
-      html += '<option value="other"' + (row.ticketType === 'other' || !row.ticketType ? ' selected' : '') + '>其他</option>';
-      (tp.waterDance || []).forEach(function(t, j) {
-        var val = 'wd-' + j;
-        html += '<option value="' + val + '"' + (row.ticketType === val ? ' selected' : '') + '>水舞間 ' + t.name + ' (' + t.guestPrice + ')</option>';
-      });
-      var wp = tp.waterPark || { guestPrice: 450 };
-      html += '<option value="wp"' + (row.ticketType === 'wp' ? ' selected' : '') + '>水上樂園手帶 (' + wp.guestPrice + ')</option>';
-      html += '</select>';
-      if (row.ticketType === 'other' || !row.ticketType) {
-        html += '<input type="text" placeholder="項目名稱" class="form-input" style="flex:1;min-width:80px;" value="' + (row.name || '') + '" onchange="MemberPage._updExp(' + i + ',\'name\',this.value)">';
+      if (row.ticketType === 'roomfee') {
+        /* 房費類型：固定顯示「房費」，不顯示下拉和名稱輸入 */
+        html += '<span style="flex:2;min-width:180px;display:flex;align-items:center;font-weight:600;color:var(--text-primary);">房費</span>';
       } else {
-        html += '<span style="flex:1;min-width:80px;display:flex;align-items:center;font-size:var(--font-size-sm);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (row.name || '') + '</span>';
+        html += '<select class="form-input" style="flex:1;min-width:100px;" onchange="MemberPage._updExpType(' + i + ',this.value)">';
+        html += '<option value="other"' + (row.ticketType === 'other' || !row.ticketType ? ' selected' : '') + '>其他</option>';
+        (tp.waterDance || []).forEach(function(t, j) {
+          var val = 'wd-' + j;
+          html += '<option value="' + val + '"' + (row.ticketType === val ? ' selected' : '') + '>水舞間 ' + t.name + ' (' + t.guestPrice + ')</option>';
+        });
+        var wp = tp.waterPark || { guestPrice: 450 };
+        html += '<option value="wp"' + (row.ticketType === 'wp' ? ' selected' : '') + '>水上樂園手帶 (' + wp.guestPrice + ')</option>';
+        html += '</select>';
+        if (row.ticketType === 'other' || !row.ticketType) {
+          html += '<input type="text" placeholder="項目名稱" class="form-input" style="flex:1;min-width:80px;" value="' + (row.name || '') + '" onchange="MemberPage._updExp(' + i + ',\'name\',this.value)">';
+        } else {
+          html += '<span style="flex:1;min-width:80px;display:flex;align-items:center;font-size:var(--font-size-sm);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (row.name || '') + '</span>';
+        }
       }
       html += '<input type="number" step="1" min="1" placeholder="數量" class="form-input" style="width:60px;flex:0 0 60px;" value="' + (row.quantity || 1) + '" oninput="MemberPage._updExp(' + i + ',\'quantity\',this.value)">';
       html += '<input type="number" placeholder="金額" class="form-input exp-amt" style="width:80px;flex:0 0 80px;" value="' + (row.amountHK || 0) + '" onchange="MemberPage._updExp(' + i + ',\'amountHK\',this.value)">';
       html += '<input type="number" step="0.01" placeholder="匯率" class="form-input" style="width:60px;flex:0 0 60px;" value="' + (row.exchangeRate || 4.2) + '" onchange="MemberPage._updExp(' + i + ',\'exchangeRate\',this.value)">';
       html += '<button class="btn-sm btn-danger" onclick="MemberPage._delExp(' + i + ')" style="flex:0 0 32px;padding:4px;">×</button>';
       html += '</div>';
-      // 非其他時顯示單價提示
-      if (row.ticketType && row.ticketType !== 'other' && row.unitPrice) {
+      // 非其他時顯示單價提示（房費不顯示）
+      if (row.ticketType && row.ticketType !== 'other' && row.ticketType !== 'roomfee' && row.unitPrice) {
         html += '<div class="exp-hint-' + i + '" style="font-size:var(--font-size-sm);color:var(--text-secondary);padding-left:4px;margin-bottom:4px;">單價 ' + row.unitPrice + ' HK × ' + (row.quantity || 1) + ' = ' + ((row.unitPrice || 0) * (row.quantity || 1)) + ' HK</div>';
       }
     });
@@ -3003,7 +3008,7 @@ var MemberPage = (function() {
       // 允許空字串暫存，不強制 || 1，避免 BACKSPACE 刪不掉
       var qty = val === '' ? 0 : (parseInt(val) || 0);
       _expenseRows[i].quantity = qty;
-      if (_expenseRows[i].ticketType && _expenseRows[i].ticketType !== 'other' && _expenseRows[i].unitPrice) {
+      if (_expenseRows[i].ticketType && _expenseRows[i].ticketType !== 'other' && _expenseRows[i].ticketType !== 'roomfee' && _expenseRows[i].unitPrice) {
         _expenseRows[i].amountHK = _expenseRows[i].unitPrice * (qty || 1);
         // 只更新金額欄和提示行，不重渲染整行（避免搶焦點）
         var amtInput = document.querySelector('.expense-row[data-idx="' + i + '"] .exp-amt');
@@ -3744,10 +3749,62 @@ var RoomPage = (function() {
     render();
   }
 
+  function pushExpenseToMember(bookingId) {
+    var b = Bookings.getById(bookingId);
+    if (!b) return;
+    if (!b.memberId) { Toast.warning('此訂房未關聯會員'); return; }
+
+    /* 找會員在此團的交易記錄 */
+    var tripTxs = MemberTxs.getByTrip(_selectedTrip);
+    var tx = tripTxs.filter(function(t) { return t.memberId === b.memberId; })[0];
+    if (!tx) {
+      var m = Members.getById(b.memberId);
+      Toast.warning('會員 ' + (m ? m.name : b.memberId) + ' 在此團尚無帳務記錄，請先建立帳務');
+      return;
+    }
+
+    /* 防重複 */
+    var existing = (tx.expenses || []).some(function(e) { return e.sourceBookingId === bookingId; });
+    if (existing) { Toast.warning('此房費已匯入過'); return; }
+
+    /* 計算客收金額 */
+    var settings = Settings.load();
+    var roomFeeRate = settings.roomFeeRate || 150;
+    var feeData = calcTripFeeData();
+    var fd = calcBookingFee(b, feeData, roomFeeRate);
+    var charge = fd.charge;
+    if (b.chargeGuest && b.chargeGuest > 0) charge = b.chargeGuest;
+
+    /* 加開銷 */
+    var expenses = (tx.expenses || []).map(function(e) { return Object.assign({}, e); });
+    expenses.push({
+      ticketType: 'roomfee',
+      name: '房費',
+      quantity: 1,
+      unitPrice: charge,
+      amountHK: charge,
+      exchangeRate: 4.2,
+      sourceBookingId: bookingId
+    });
+    MemberTxs.update(tx.id, { expenses: expenses });
+
+    var member = Members.getById(b.memberId);
+    Toast.success('已匯入 ' + (member ? member.name : '') + ' 的開銷：房費 $' + charge);
+    render();
+  }
+
   function renderFeePanel() {
     var settings = Settings.load();
     var roomFeeRate = settings.roomFeeRate || 150;
     var feeData = calcTripFeeData();
+
+    /* 預先計算哪些訂房已匯入開銷 */
+    var pushedBookings = {};
+    MemberTxs.getByTrip(_selectedTrip).forEach(function(tx) {
+      (tx.expenses || []).forEach(function(e) {
+        if (e.sourceBookingId) pushedBookings[e.sourceBookingId] = true;
+      });
+    });
 
     /* 計算每筆訂房費用 */
     var rows = [];
@@ -3825,6 +3882,13 @@ var RoomPage = (function() {
         html += '<div class="rm-fee-card-amount">';
         if (r.isPaid && r.charge > 0) {
           html += '$' + r.charge.toLocaleString();
+          if (b.memberId) {
+            if (pushedBookings[b.id]) {
+              html += ' <span style="color:var(--success);font-size:var(--font-size-sm);margin-left:8px;">\u2705\u5DF2\u532F\u5165</span>';
+            } else {
+              html += ' <button class="btn-sm btn-primary" style="margin-left:8px;padding:2px 8px;font-size:var(--font-size-sm);" onclick="RoomPage.pushExpenseToMember(\'' + b.id + '\')">\u532F\u5165\u958B\u92B7</button>';
+            }
+          }
         } else {
           html += '<span class="text-muted">- -</span>';
         }
@@ -3883,6 +3947,7 @@ var RoomPage = (function() {
     goPage: goPage, onSearch: onSearch, sortByCol: sortByCol, setFeeFilter: setFeeFilter,
     goFees: goFees, goProfit: goProfit,
     toggleFeePanel: toggleFeePanel, cycleFeeType: cycleFeeType, setFeeMode: setFeeMode,
+    pushExpenseToMember: pushExpenseToMember,
   };
 })();
 
