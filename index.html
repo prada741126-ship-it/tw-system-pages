@@ -207,6 +207,12 @@ a { color: var(--accent); text-decoration: none; }
 .sub-table td { padding: 4px 10px; border-bottom: 1px solid var(--border); }
 .sub-table-container { margin: var(--spacing-sm) 0; padding: var(--spacing-sm); background: var(--bg-primary); border-radius: var(--radius); }
 
+/* ===== 子頁籤列（頁面內分頁切換） ===== */
+.sub-tab-bar { display: flex; gap: 0; margin-bottom: var(--spacing-md); border-bottom: 2px solid var(--border); }
+.sub-tab { padding: 10px 24px; border: none; background: none; font-size: var(--font-size-base); font-weight: 500; color: var(--text-secondary); cursor: pointer; transition: all var(--transition-fast); position: relative; bottom: -2px; border-bottom: 2px solid transparent; }
+.sub-tab:hover { color: var(--text-primary); background: var(--bg-hover); }
+.sub-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
 /* ===== 表單 ===== */
 .form-input {
   padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius);
@@ -1347,6 +1353,6 @@ a { color: var(--accent); text-decoration: none; }
 <div id="toast-container" class="toast-container"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" defer></script>
-<script src="app.js?v=1784666670562"></script>
+<script src="app.js?v=1784668478682"></script>
 </body>
 </html>

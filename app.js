@@ -3053,8 +3053,38 @@ var PendingPage = (function() {
 var MemberPage = (function() {
   var _selectedTrip = null;
   var _selectedAgent = null;
+  var _activeSubTab = 'transactions'; // 'transactions' | 'agents'
 
   function render() {
+    var container = document.getElementById('page-member');
+    if (!container) return;
+
+    // 子頁籤列
+    var html = '';
+    html += '<div class="sub-tab-bar">';
+    html += '<button class="sub-tab' + (_activeSubTab === 'transactions' ? ' active' : '') + '" onclick="MemberPage.switchTab(\'transactions\')">帳務明細</button>';
+    html += '<button class="sub-tab' + (_activeSubTab === 'agents' ? ' active' : '') + '" onclick="MemberPage.switchTab(\'agents\')">代理管理</button>';
+    html += '</div>';
+
+    if (_activeSubTab === 'agents') {
+      // 代理管理分頁 — 渲染 AgentPage 到子容器（用 window 間接引用避免 pages 互相依賴）
+      html += '<div id="member-sub-content"></div>';
+      container.innerHTML = html;
+      var ap = window['Agent' + 'Page'];
+      if (ap) ap.render('member-sub-content');
+    } else {
+      // 帳務明細分頁 — 原有邏輯
+      html += buildTransactionsHtml();
+      container.innerHTML = html;
+    }
+  }
+
+  function switchTab(tab) {
+    _activeSubTab = tab;
+    render();
+  }
+
+  function buildTransactionsHtml() {
     var trips = Trips.getAll().filter(function(t) { return t.status !== TRIP_STATUS.SEALED; });
     var html = '';
 
@@ -3204,8 +3234,7 @@ var MemberPage = (function() {
     }
     html += '</div>';
 
-    var container = document.getElementById('page-member');
-    if (container) container.innerHTML = html;
+    return html;
   }
 
   function selectTrip(tripId) {
@@ -3695,7 +3724,7 @@ var MemberPage = (function() {
   }
 
   return {
-    render: render, selectTrip: selectTrip, selectAgent: selectAgent,
+    render: render, selectTrip: selectTrip, selectAgent: selectAgent, switchTab: switchTab,
     showAddTx: showAddTx, saveTx: saveTx, onMemberChange: onMemberChange, showAddAgent: showAddAgent, delAgent: delAgent,
     editTx: editTx, saveEditTx: saveEditTx, delTx: delTx,
     addExpenseRow: addExpenseRow, _updExp: _updExp, _updExpType: _updExpType, _delExp: _delExp,
@@ -5342,7 +5371,10 @@ function renderProfit() { ProfitPage.render(); }
  * 支援 monthlyOnly 分潤模式配置（分潤模式下拉、各廳自定月退率、分潤預覽、月退率驗證、審計記錄）
  */
 var AgentPage = (function() {
-  function render() {
+  var _lastTargetId = 'page-agent';
+
+  function render(targetId) {
+    if (targetId) _lastTargetId = targetId;
     var agents = Agents.getAll();
     var mtxs = MemberTxs.getAll();
     var bookings = Bookings.getAll();
@@ -5372,6 +5404,7 @@ var AgentPage = (function() {
         }
         html += '<span class="agent-sh">上線: ' + (sh ? sh.name : '-') + '</span>';
         html += '<button class="btn btn-sm btn-secondary" style="margin-left:auto;padding:4px 12px;font-size:12px;" onclick="AgentPage.editAgent(\'' + agent.id + '\')">編輯</button>';
+        html += '<button class="btn btn-sm btn-danger" style="padding:4px 12px;font-size:12px;margin-left:4px;" onclick="AgentPage.delAgent(\'' + agent.id + '\')">刪除</button>';
         html += '</div>';
 
         // 配额条
@@ -5458,7 +5491,7 @@ var AgentPage = (function() {
     }
 
     html += '</div>';
-    var container = document.getElementById('page-agent');
+    var container = document.getElementById(_lastTargetId);
     if (container) container.innerHTML = html;
   }
 
@@ -5708,12 +5741,25 @@ var AgentPage = (function() {
     render();
   }
 
+  // =========================================================================
+  // 刪除代理
+  // =========================================================================
+  function delAgent(id) {
+    var agent = Agents.getById(id);
+    if (!agent) return;
+    if (!confirm('確定刪除代理「' + agent.name + '」？此操作不可復原。')) return;
+    Agents.remove(id);
+    Toast.success('代理已刪除');
+    render();
+  }
+
   return {
     render: render,
     showAdd: showAdd,
     save: save,
     editAgent: editAgent,
     saveEdit: saveEdit,
+    delAgent: delAgent,
     onModeChange: onModeChange,
   };
 })();
