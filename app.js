@@ -6499,6 +6499,7 @@ var SettingsPage = (function() {
     };
 
     saveEmployees(employees);
+    Uploader.enqueue(FB_PATH.EMPLOYEE_LIST, employees);
     Toast.success('\u5DF2\u65B0\u589E\u54E1\u5DE5\uFF1A' + name);
 
     document.getElementById('emp-name').value = '';
@@ -6511,6 +6512,7 @@ var SettingsPage = (function() {
     var employees = loadEmployees();
     delete employees[tgId];
     saveEmployees(employees);
+    Uploader.enqueue(FB_PATH.EMPLOYEE_LIST, employees);
     Toast.success('\u5DF2\u522A\u9664');
     renderEmployeeTable();
   }
