@@ -1174,6 +1174,29 @@ function _setupWatchers() {
     _watchers.push(off);
   });
 
+  /* EMPLOYEE_LIST 特殊處理（物件非陣列） */
+  (function() {
+    var off = fbOn(FB_PATH.EMPLOYEE_LIST, function(remoteVal) {
+      if (_isSyncing) return;
+      _isSyncing = true;
+      try {
+        var local = Store.read(STORAGE_KEYS.EMPLOYEE_LIST) || {};
+        var remote = remoteVal || {};
+        var merged = Object.assign({}, local);
+        Object.keys(remote).forEach(function(k) {
+          if (!merged[k] || (remote[k].addedAt && remote[k].addedAt > (merged[k].addedAt || 0))) {
+            merged[k] = remote[k];
+          }
+        });
+        Store.write(STORAGE_KEYS.EMPLOYEE_LIST, merged);
+      } catch(e) {
+        console.error('[Watchers] EMPLOYEE_LIST', e);
+      }
+      _isSyncing = false;
+    });
+    _watchers.push(off);
+  })();
+
   // 连接状态
   fbOn(FB_PATH.CONNECTED, function(val) {
     State.set('connected', !!val);
@@ -3782,10 +3805,13 @@ var RoomPage = (function() {
         html += '<td>' + (b.checkOut || '') + '</td>';
         html += '<td class="num">' + (b.nights || 1) + '</td>';
         html += '<td class="num">' + ((b.threshold || 0) / 10000).toFixed(0) + '萬</td>';
-        html += '<td>' + statusBadge(b.status) + '</td>';
+    html += '<td>' + statusCell(b) + '</td>';
         html += '<td>' + escHtml(b.confirmNo || '') + '</td>';
         html += '<td>' + feeBadge(b) + '</td>';
         html += '<td>';
+        if (!b.memberId) {
+          html += '<button class="btn-sm" style="padding:1px 6px;font-size:11px;background:var(--accent);color:#fff;" onclick="RoomPage.linkMember(\'' + b.id + '\')">關聯</button> ';
+        }
         html += '<button class="btn-sm" onclick="RoomPage.editBooking(\'' + b.id + '\')">編輯</button> ';
         html += '<button class="btn-sm btn-danger" onclick="RoomPage.delBooking(\'' + b.id + '\')">刪</button>';
         html += '</td>';
@@ -3954,8 +3980,52 @@ var RoomPage = (function() {
       'checked-in': '<span class="badge badge-info">已入住</span>',
       'checked-out': '<span class="badge badge-success">已退房</span>',
       'cancelled': '<span class="badge badge-danger">已取消</span>',
+      'overdue-checkout': '<span class="badge badge-danger" title="已過退房日但未手動退房">⚠️ 逾期未退</span>',
     };
     return map[status] || status;
+  }
+
+  /* 根據實際日期判斷顯示狀態 */
+  function getDisplayStatus(b) {
+    if (b.status === 'cancelled') return 'cancelled';
+    if (b.status === 'checked-out') return 'checked-out';
+
+    var today = new Date();
+    var todayStr = today.getFullYear() + '-' +
+      String(today.getMonth() + 1).padStart(2, '0') + '-' +
+      String(today.getDate()).padStart(2, '0');
+
+    /* 已過退房日但未手動退房 → 逾期提醒 */
+    if (b.checkOut && b.checkOut < todayStr && b.status !== 'checked-out') {
+      return 'overdue-checkout';
+    }
+
+    /* 今日在入住期間內 → 自動顯示已入住 */
+    if (b.checkIn && b.checkOut &&
+        b.checkIn <= todayStr && b.checkOut >= todayStr) {
+      return 'checked-in';
+    }
+
+    /* 尚未到入住日 → 保持原狀態 */
+    return b.status;
+  }
+
+  /* 狀態顯示輔助：自動偵測 vs 手動設定 */
+  function statusCell(b) {
+    var displayStatus = getDisplayStatus(b);
+    var badge = statusBadge(displayStatus);
+
+    /* 標記自動偵測 */
+    if (displayStatus !== b.status && displayStatus === 'checked-in') {
+      badge += ' <span class="text-muted" style="font-size:10px;" title="系統依日期自動判斷，實際狀態：' + (STATUS_LABELS[b.status] || b.status) + '">[自動]</span>';
+    }
+
+    /* 逾期退房可手動設為已退房 */
+    if (displayStatus === 'overdue-checkout') {
+      badge += ' <button class="btn-sm" style="padding:0 4px;font-size:10px;margin-left:4px;" onclick="RoomPage.setCheckedOut(\'' + b.id + '\')" title="手動設為已退房">設退房</button>';
+    }
+
+    return badge;
   }
 
   function feeBadge(b) {
@@ -4499,6 +4569,37 @@ var RoomPage = (function() {
     });
   }
 
+  /* ===== 入住狀態操作 ===== */
+  function setCheckedOut(bookingId) {
+    Bookings.update(bookingId, { status: 'checked-out' });
+    Toast.success('已設為退房');
+    render();
+  }
+
+  /* ===== 訂房關聯會員 ===== */
+  function linkMember(bookingId) {
+    var members = Members.getAll();
+    var html = '<div class="form-group"><label>選擇會員</label>';
+    html += '<select id="link-member-select" class="form-input">';
+    html += '<option value="">選擇...</option>';
+    members.forEach(function(m) {
+      html += '<option value="' + m.id + '">' + m.id + ' ' + m.name + '</option>';
+    });
+    html += '</select></div>';
+    html += '<div style="text-align:right;margin-top:16px;">';
+    html += '<button class="btn btn-primary" onclick="RoomPage.saveLinkMember(\'' + bookingId + '\')">儲存</button></div>';
+    Modal.open('關聯會員', html);
+  }
+
+  function saveLinkMember(bookingId) {
+    var memberId = document.getElementById('link-member-select').value;
+    if (!memberId) { Toast.warning('請選擇會員'); return; }
+    Bookings.update(bookingId, { memberId: memberId });
+    Modal.close();
+    Toast.success('已關聯會員');
+    render();
+  }
+
   return {
     render: render, selectTrip: selectTrip,
     showAddBooking: showAddBooking, onCasinoChange: onCasinoChange, onHotelChange: onHotelChange,
@@ -4509,6 +4610,7 @@ var RoomPage = (function() {
     pushExpenseToMember: pushExpenseToMember,
     showHotelConfig: showHotelConfig, saveHotelThreshold: saveHotelThreshold,
     saveNewHotelConfig: saveNewHotelConfig, delHotelConfig: delHotelConfig,
+    setCheckedOut: setCheckedOut, linkMember: linkMember, saveLinkMember: saveLinkMember,
   };
 })();
 
@@ -6264,8 +6366,28 @@ var SettingsPage = (function() {
     html += '<div class="form-group" style="align-self:flex-end;"><button class="btn btn-primary" onclick="SettingsPage.changePwd()">更新密碼</button></div>';
     html += '</div></div>';
 
+    // 員工管理
+    html += '<div class="card">';
+    html += '<div class="card-header"><h3>Bot 員工管理</h3></div>';
+    html += '<p style="color:var(--text-secondary);font-size:var(--font-size-sm);margin:0 0 12px 0;">管理可使用 Telegram Bot（房務/帳務）的員工及其權限。</p>';
+    html += '<table class="data-table"><thead><tr>';
+    html += '<th>姓名</th><th>Telegram ID</th><th>角色</th><th>新增時間</th><th>操作</th>';
+    html += '</tr></thead><tbody id="emp-table-body">';
+    html += '</tbody></table>';
+
+    html += '<div style="margin-top:16px;padding:12px;background:var(--bg-tertiary);border-radius:var(--radius);">';
+    html += '<h4 style="margin:0 0 8px;">新增員工</h4>';
+    html += '<div class="form-row" style="align-items:flex-end;">';
+    html += '<div class="form-group"><label>姓名</label><input type="text" id="emp-name" class="form-input" placeholder="員工姓名"></div>';
+    html += '<div class="form-group"><label>Telegram ID（數字）</label><input type="text" id="emp-tgid" class="form-input" placeholder="從 Bot 對話取得"></div>';
+    html += '<div class="form-group"><label>角色</label><select id="emp-role" class="form-input"><option value="staff">員工</option><option value="admin">管理員</option></select></div>';
+    html += '<div class="form-group" style="align-self:flex-end;"><button class="btn btn-primary" onclick="SettingsPage.addEmployee()">新增</button></div>';
+    html += '</div></div></div>';
+
     var container = document.getElementById('page-settings');
     if (container) container.innerHTML = html;
+    /* 延遲渲染員工表格，確保 DOM 就緒 */
+    setTimeout(function() { renderEmployeeTable(); }, 50);
   }
 
   function saveRate() {
@@ -6322,7 +6444,78 @@ var SettingsPage = (function() {
     if (icon) icon.textContent = card.classList.contains('st-collapsed') ? '▶' : '▼';
   }
 
-  return { render: render, saveRate: saveRate, updateHall: updateHall, toggleRebate: toggleRebate, toggleCard: toggleCard, updateTicket: updateTicket, changePwd: changePwd };
+  function escHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /* ===== 員工管理 ===== */
+  function loadEmployees() {
+    return Store.read(STORAGE_KEYS.EMPLOYEE_LIST) || {};
+  }
+
+  function saveEmployees(data) {
+    Store.write(STORAGE_KEYS.EMPLOYEE_LIST, data);
+  }
+
+  function renderEmployeeTable() {
+    var employees = loadEmployees();
+    var tbody = document.getElementById('emp-table-body');
+    if (!tbody) return;
+
+    var ids = Object.keys(employees);
+    if (ids.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-secondary);">尚無員工</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = ids.map(function(tgId) {
+      var e = employees[tgId];
+      var roleLabel = e.role === 'admin' ? '\u7BA1\u7406\u54E1' : '\u54E1\u5DE5';
+      return '<tr>' +
+        '<td>' + escHtml(e.name || '') + '</td>' +
+        '<td><code>' + escHtml(tgId) + '</code></td>' +
+        '<td>' + roleLabel + '</td>' +
+        '<td>' + (e.addedAt ? new Date(e.addedAt).toLocaleDateString() : '-') + '</td>' +
+        '<td><button class="btn-sm btn-danger" onclick="SettingsPage.delEmployee(\'' + escHtml(tgId) + '\')">\u522A\u9664</button></td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function addEmployee() {
+    var name = document.getElementById('emp-name').value.trim();
+    var tgId = document.getElementById('emp-tgid').value.trim();
+    var role = document.getElementById('emp-role').value;
+
+    if (!name) { Toast.warning('\u8ACB\u8F38\u5165\u59D3\u540D'); return; }
+    if (!tgId) { Toast.warning('\u8ACB\u8F38\u5165 Telegram ID'); return; }
+    if (!/^\d+$/.test(tgId)) { Toast.warning('Telegram ID \u5FC5\u9808\u662F\u7D14\u6578\u5B57'); return; }
+
+    var employees = loadEmployees();
+    employees[tgId] = {
+      name: name,
+      role: role,
+      addedAt: Date.now(),
+      addedBy: 'web',
+    };
+
+    saveEmployees(employees);
+    Toast.success('\u5DF2\u65B0\u589E\u54E1\u5DE5\uFF1A' + name);
+
+    document.getElementById('emp-name').value = '';
+    document.getElementById('emp-tgid').value = '';
+    renderEmployeeTable();
+  }
+
+  function delEmployee(tgId) {
+    if (!confirm('\u78BA\u5B9A\u522A\u9664\u6B64\u54E1\u5DE5\uFF1F')) return;
+    var employees = loadEmployees();
+    delete employees[tgId];
+    saveEmployees(employees);
+    Toast.success('\u5DF2\u522A\u9664');
+    renderEmployeeTable();
+  }
+
+  return { render: render, saveRate: saveRate, updateHall: updateHall, toggleRebate: toggleRebate, toggleCard: toggleCard, updateTicket: updateTicket, changePwd: changePwd, addEmployee: addEmployee, delEmployee: delEmployee };
 })();
 
 
@@ -6417,6 +6610,8 @@ function loadAllData() {
   Settings.load();
   ExtraIncome.load();
   HotelConfig.load();
+  /* EMPLOYEE_LIST: 物件結構，直接從 localStorage 讀取 */
+  State.set('employeeList', Store.read(STORAGE_KEYS.EMPLOYEE_LIST) || {});
   RecentlyDeleted.init();
 }
 
@@ -6447,6 +6642,7 @@ function initApp() {
         SETTINGS: State.get('settings'),
         EXTRA_INCOME: State.get('extraIncome'),
         HOTEL_CONFIG: State.get('hotelConfig'),
+        EMPLOYEE_LIST: State.get('employeeList'),
       });
     } else {
       console.warn('[App] Firebase 未连接，离线模式');
