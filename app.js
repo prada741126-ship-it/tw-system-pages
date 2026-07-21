@@ -167,6 +167,14 @@ var TRIP_STATUS = {
 };
 
 // ============================================================================
+// 代理分潤模式
+// ============================================================================
+var PROFIT_MODE = {
+  STANDARD:    'standard',     // 標準模式：現結+月退都進錢池，洗碼計入個人貢獻
+  MONTHLY_ONLY:'monthlyOnly',  // 僅月退模式：現結不進錢池，月退用自定費率進錢池，洗碼不計入個人貢獻
+};
+
+// ============================================================================
 // 订房状态
 // ============================================================================
 var BOOKING_STATUS = {
@@ -309,7 +317,7 @@ if (typeof module !== 'undefined' && module.exports) {
     APP: APP, CONFIG: CONFIG, STORAGE_KEYS: STORAGE_KEYS,
     TW_FIREBASE_CONFIG: TW_FIREBASE_CONFIG, TW_FIREBASE_SDK_VERSION: TW_FIREBASE_SDK_VERSION,
     FIREBASE_CDN: FIREBASE_CDN, FB_PATH: FB_PATH, EVENTS: EVENTS,
-    VIP_HALLS: VIP_HALLS, TRIP_STATUS: TRIP_STATUS, BOOKING_STATUS: BOOKING_STATUS,
+    VIP_HALLS: VIP_HALLS, PROFIT_MODE: PROFIT_MODE, TRIP_STATUS: TRIP_STATUS, BOOKING_STATUS: BOOKING_STATUS,
     FEE_TYPE: FEE_TYPE, MEMBER_STATUS: MEMBER_STATUS, CASINO_ORDER: CASINO_ORDER,
     PAGES: PAGES, SHORTCUTS: SHORTCUTS, PRESET_HOTEL_CONFIG: PRESET_HOTEL_CONFIG,
     DEFAULT_SETTINGS: DEFAULT_SETTINGS,
@@ -668,17 +676,18 @@ function calcTripStats(trip, memberTxs, bookings) {
 }
 
 // 股东分潤计算
+// 支援 monthlyOnly 代理：現結不進錢池、月退用自定費率、洗碼不計入個人貢獻
 function calcShareholderProfit(shareholder, allTxs, settings, month) {
   var sId = shareholder.id;
   var monthlyRate = (settings.monthlyRates || {})[month] || { exchangeRate: 4.2, shareholderRate: 4.2 };
   var exchangeRate = monthlyRate.shareholderRate || 4.2;
+  var halls = settings.vipHalls || VIP_HALLS;
 
   // 该股东线下所有交易
   var shTxs = (allTxs || []).filter(function(t) { return t.shareholderId === sId; });
 
-  // 按厅分组洗码（優先從團 hallIds 讀取，交易記錄 vipHallId 為後備）
-  var hallWash = {};
-  shTxs.forEach(function(t) {
+  // 輔助：取得交易廳 ID（優先從團 hallIds 讀取，vipHallId 為後備）
+  function getHallId(t) {
     var hallId = t.vipHallId || 'unknown';
     if (t.tripId && typeof Trips !== 'undefined') {
       var trip = Trips.getById(t.tripId);
@@ -686,28 +695,76 @@ function calcShareholderProfit(shareholder, allTxs, settings, month) {
         hallId = trip.hallIds[0];
       }
     }
-    hallWash[hallId] = (hallWash[hallId] || 0) + (t.washCode || 0);
+    return hallId;
+  }
+
+  // 輔助：判斷交易是否屬於 monthlyOnly 代理
+  function isMonthlyOnlyTx(t) {
+    if (!t.agentId || typeof Agents === 'undefined') return false;
+    var agent = Agents.getById(t.agentId);
+    if (!agent) return false;
+    return agent.profitMode === PROFIT_MODE.MONTHLY_ONLY;
+  }
+
+  // 分組洗碼
+  var hallWash = {};            // 全量（含 monthlyOnly），供分布表用
+  var standardHallWash = {};    // 標準交易，供盈利計算用
+  var moAgentHallWash = {};     // monthlyOnly 按 agentId→hallId 分組，供自定月退計算用
+  var monthlyOnlyWash = 0;      // monthlyOnly 洗碼合計（供 UI 顯示）
+
+  shTxs.forEach(function(t) {
+    var hallId = getHallId(t);
+    var wash = t.washCode || 0;
+    hallWash[hallId] = (hallWash[hallId] || 0) + wash;
+
+    if (isMonthlyOnlyTx(t)) {
+      monthlyOnlyWash += wash;
+      if (!moAgentHallWash[t.agentId]) moAgentHallWash[t.agentId] = {};
+      moAgentHallWash[t.agentId][hallId] = (moAgentHallWash[t.agentId][hallId] || 0) + wash;
+    } else {
+      standardHallWash[hallId] = (standardHallWash[hallId] || 0) + wash;
+    }
   });
 
-  // 个人总洗码
-  var personalWash = shTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
+  // 個人總洗碼（只計標準交易，不含 monthlyOnly → 貢獻度 < 100%）
+  var personalWash = 0;
+  Object.keys(standardHallWash).forEach(function(h) {
+    personalWash += standardHallWash[h];
+  });
 
-  // 各厅盈利（現結）和月退費分開計算
-  var halls = settings.vipHalls || VIP_HALLS;
+  // 各廳盈利（現結）和月退費分開計算
   var hallProfit = {};
   var totalProfit = 0;   // 盈利(現結)
   var monthlyRebate = 0; // 月退費
 
+  // 標準交易：按現有邏輯計算各廳盈利和月退費
   halls.forEach(function(hall) {
-    var wash = hallWash[hall.id] || 0;
-    var washRaw = wash * 10000;
-    var cashRate = hall.cashRate || hall.rate; // 向後相容：無 cashRate 時用 rate
+    var stdWash = standardHallWash[hall.id] || 0;
+    var washRaw = stdWash * 10000;
+    var cashRate = hall.cashRate || hall.rate; // 向後相容
     var profit = washRaw * cashRate;           // 盈利 = 洗碼 × 現結%
-    hallProfit[hall.id] = { wash: wash, profit: profit };
+    hallProfit[hall.id] = { wash: stdWash, profit: profit };
     totalProfit += profit;
     if (hall.hasMonthlyRebate) {
       monthlyRebate += washRaw * hall.rebateRate;  // 月退費 = 洗碼 × 月退%
     }
+  });
+
+  // monthlyOnly 交易：現結不進 totalProfit；月退用各代理自定費率（無自定則用廳預設）
+  Object.keys(moAgentHallWash).forEach(function(agentId) {
+    var agent = (typeof Agents !== 'undefined') ? Agents.getById(agentId) : null;
+    if (!agent) return;
+    var hallsForAgent = moAgentHallWash[agentId];
+    Object.keys(hallsForAgent).forEach(function(hallId) {
+      var hall = halls.find(function(h) { return h.id === hallId; });
+      if (!hall || !hall.hasMonthlyRebate) return;
+      // 優先用代理自定費率，無自定則用廳預設費率
+      var rate = (agent.customRebateRates && typeof agent.customRebateRates[hallId] === 'number')
+        ? agent.customRebateRates[hallId]
+        : hall.rebateRate;
+      var moWash = hallsForAgent[hallId];
+      monthlyRebate += moWash * 10000 * rate;
+    });
   });
 
   // totalProfit 用於分潤計算 = 盈利 + 月退費 = 合計
@@ -717,9 +774,10 @@ function calcShareholderProfit(shareholder, allTxs, settings, month) {
     shareholderId: sId,
     shareholderName: shareholder.name,
     shares: shareholder.shares,
-    personalWash: personalWash,
-    hallWash: hallWash,
-    hallProfit: hallProfit,
+    personalWash: personalWash,         // 標準交易洗碼（不含 monthlyOnly）
+    monthlyOnlyWash: monthlyOnlyWash,    // monthlyOnly 代理洗碼（供 UI 顯示）
+    hallWash: hallWash,                  // 全量洗碼（含 monthlyOnly，供分布表用）
+    hallProfit: hallProfit,              // 標準交易盈利（含 wash + profit）
     totalProfit: totalProfit,
     monthlyRebate: monthlyRebate,
     exchangeRate: exchangeRate,
@@ -1317,6 +1375,8 @@ var Agents = (function() {
       id: data.id || ('A' + now),
       name: data.name || '',
       shareholderId: data.shareholderId || '',
+      profitMode: data.profitMode || PROFIT_MODE.STANDARD,
+      customRebateRates: data.customRebateRates || null,
       active: true,
       createdAt: now,
       _fbKey: 'agent_' + (data.id || now),
@@ -2642,10 +2702,13 @@ var OverviewPage = (function() {
     if (shareholders.length > 0 && totalMonthWash > 0) {
       var shColors = ['var(--hall-lyi)', 'var(--hall-yub)', 'var(--hall-jm1)', 'var(--hall-jm8)', 'var(--accent-light)'];
       var maxShWash = 0;
+      var totalMonthlyOnlyWash = 0;
       shareholders.forEach(function(sh) {
         var pd = calcShareholderProfit(sh, monthTxs, settings, currentMonth);
         if (pd.personalWash > maxShWash) maxShWash = pd.personalWash;
+        totalMonthlyOnlyWash += (pd.monthlyOnlyWash || 0);
       });
+      if (totalMonthlyOnlyWash > maxShWash) maxShWash = totalMonthlyOnlyWash;
       html += '<div class="ov-sh-bar-list">';
       shareholders.forEach(function(sh, idx) {
         var pd = calcShareholderProfit(sh, monthTxs, settings, currentMonth);
@@ -2657,7 +2720,24 @@ var OverviewPage = (function() {
         html += '<span class="ov-sh-bar-val">' + formatNum(pd.personalWash) + ' 萬</span>';
         html += '</div>';
       });
+      // 特殊代理(僅月退)條 — 填補 personalWash 與 totalWash 的缺口
+      if (totalMonthlyOnlyWash > 0) {
+        var moBarPct = maxShWash > 0 ? (totalMonthlyOnlyWash / maxShWash * 100) : 0;
+        html += '<div class="ov-sh-bar-row" style="opacity:0.75;border-top:1px dashed var(--border);padding-top:6px;margin-top:4px;">';
+        html += '<span class="ov-sh-bar-name" style="font-size:12px;">特殊代理(僅月退)</span>';
+        html += '<div class="ov-sh-bar-track"><div class="ov-sh-bar-fill" style="width:' + moBarPct + '%;background:#999;"></div></div>';
+        html += '<span class="ov-sh-bar-val" style="font-size:12px;">' + formatNum(totalMonthlyOnlyWash) + ' 萬</span>';
+        html += '</div>';
+      }
       html += '</div>';
+      // 口徑說明
+      if (totalMonthlyOnlyWash > 0) {
+        var personalTotal = totalMonthWash - totalMonthlyOnlyWash;
+        html += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);line-height:1.6;">';
+        html += '※ 特殊代理洗碼 ' + formatNum(totalMonthlyOnlyWash) + ' 萬計入總洗碼但不含個人貢獻<br>';
+        html += '總洗碼 ' + formatNum(totalMonthWash) + ' = 個人貢獻 ' + formatNum(personalTotal) + ' + 特殊 ' + formatNum(totalMonthlyOnlyWash);
+        html += '</div>';
+      }
     } else {
       html += '<div class="empty-state" style="padding:32px 0;">本月尚無洗碼記錄</div>';
     }
@@ -5257,8 +5337,9 @@ function renderProfit() { ProfitPage.render(); }
 
 // === src/pages/agent.js ===
 /**
- * pages/agent.js — 代理帐务页
+ * pages/agent.js — 代理帳務頁
  * 代理级折抵 + 配额条 + 会员/房间/开销三层子表格
+ * 支援 monthlyOnly 分潤模式配置（分潤模式下拉、各廳自定月退率、分潤預覽、月退率驗證、審計記錄）
  */
 var AgentPage = (function() {
   function render() {
@@ -5281,11 +5362,16 @@ var AgentPage = (function() {
         var quota = calcAgentQuota(agent.id, mtxs, bookings);
         var totalSettle = agentTxs.reduce(function(s, t) { return s + (t.totalSettlement || 0); }, 0);
         var pct = quota.totalThreshold > 0 ? Math.min(100, (quota.totalWashRaw / quota.totalThreshold) * 100) : 0;
+        var isMonthlyOnly = (agent.profitMode || PROFIT_MODE.STANDARD) === PROFIT_MODE.MONTHLY_ONLY;
 
         html += '<div class="agent-card">';
         html += '<div class="agent-card-header">';
         html += '<span class="agent-name">' + agent.name + '</span>';
+        if (isMonthlyOnly) {
+          html += '<span class="badge badge-warning" style="font-size:11px;padding:2px 8px;border-radius:4px;background:var(--warning);color:#fff;margin-left:6px;">僅月退</span>';
+        }
         html += '<span class="agent-sh">上線: ' + (sh ? sh.name : '-') + '</span>';
+        html += '<button class="btn btn-sm btn-secondary" style="margin-left:auto;padding:4px 12px;font-size:12px;" onclick="AgentPage.editAgent(\'' + agent.id + '\')">編輯</button>';
         html += '</div>';
 
         // 配额条
@@ -5304,6 +5390,27 @@ var AgentPage = (function() {
         html += '<span>訂房: ' + agentBookings.length + ' 間</span>';
         html += '<span>合計交收: NT$ ' + Math.round(totalSettle).toLocaleString() + '</span>';
         html += '</div>';
+
+        // monthlyOnly 說明
+        if (isMonthlyOnly) {
+          html += '<div style="margin:6px 0;padding:6px 10px;background:var(--bg-secondary);border-radius:4px;font-size:12px;color:var(--text-muted);">';
+          html += '※ 此代理為「僅月退」模式：現結不進錢池，月退用自定費率進錢池，洗碼不計入所屬股東個人貢獻';
+          if (agent.customRebateRates) {
+            var halls = Settings.getVipHalls();
+            var rateStrs = [];
+            Object.keys(agent.customRebateRates).forEach(function(hid) {
+              var h = halls.find(function(x) { return x.id === hid; });
+              if (h) {
+                var r = agent.customRebateRates[hid];
+                rateStrs.push(h.name + ' ' + (r * 100).toFixed(3) + '%');
+              }
+            });
+            if (rateStrs.length > 0) {
+              html += '<br>自定月退費率：' + rateStrs.join('、');
+            }
+          }
+          html += '</div>';
+        }
 
         // 会员明细
         if (agentTxs.length > 0) {
@@ -5355,32 +5462,260 @@ var AgentPage = (function() {
     if (container) container.innerHTML = html;
   }
 
-  return { render: render, showAdd: showAdd, save: save };
+  // =========================================================================
+  // 輔助：取得有月退的廳
+  // =========================================================================
+  function getMonthlyRebateHalls() {
+    return Settings.getVipHalls().filter(function(h) { return h.hasMonthlyRebate; });
+  }
 
+  // =========================================================================
+  // 輔助：生成表單 HTML（新增 / 編輯共用）
+  // agent 參數為 null 時是新增模式，否則為編輯模式（預填資料）
+  // =========================================================================
+  function buildForm(agent) {
+    var shareholders = Shareholders.getAll();
+    var halls = getMonthlyRebateHalls();
+    var mode = agent ? (agent.profitMode || PROFIT_MODE.STANDARD) : PROFIT_MODE.STANDARD;
+    var customRates = agent ? (agent.customRebateRates || {}) : {};
+
+    var html = '';
+    // 代理名稱
+    html += '<div class="form-group"><label>代理名稱</label>';
+    html += '<input type="text" id="ag-name" class="form-input" value="' + (agent ? (agent.name || '') : '') + '"></div>';
+
+    // 所屬股東
+    html += '<div class="form-group"><label>所屬股東</label>';
+    html += '<select id="ag-sh" class="form-input">';
+    shareholders.forEach(function(sh) {
+      var selected = agent && agent.shareholderId === sh.id ? ' selected' : '';
+      html += '<option value="' + sh.id + '"' + selected + '>' + sh.name + '</option>';
+    });
+    html += '</select></div>';
+
+    // 分潤模式
+    html += '<div class="form-group"><label>分潤模式</label>';
+    html += '<select id="ag-profit-mode" class="form-input" onchange="AgentPage.onModeChange()">';
+    html += '<option value="standard"' + (mode === PROFIT_MODE.STANDARD ? ' selected' : '') + '>標準模式（現結+月退進錢池，洗碼計入貢獻）</option>';
+    html += '<option value="monthlyOnly"' + (mode === PROFIT_MODE.MONTHLY_ONLY ? ' selected' : '') + '>僅月退模式（特殊代理：現結不進錢池，月退用自定費率，洗碼不計入貢獻）</option>';
+    html += '</select></div>';
+
+    // 各廳自定月退費率（僅 monthlyOnly 時顯示）
+    html += '<div id="ag-rebate-rates" style="display:' + (mode === PROFIT_MODE.MONTHLY_ONLY ? 'block' : 'none') + ';">';
+    html += '<div class="form-group"><label>各廳自定月退費率（%）</label>';
+    html += '<p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;line-height:1.6;">';
+    html += '輸入百分比數值，例如 0.03 = 0.03%。留空表示使用廳預設費率。<br>';
+    html += '此費率決定該代理在各廳的月退金額如何進入錢池由所有股東均分。';
+    html += '</p>';
+    halls.forEach(function(hall) {
+      var currentRate = customRates[hall.id];
+      // 存儲為小數(0.0005)，顯示為百分比(0.05)
+      var ratePct = (typeof currentRate === 'number') ? (currentRate * 100).toString() : '';
+      var defaultPct = (hall.rebateRate * 100).toFixed(2);
+      var maxPct = (hall.rate * 100).toFixed(2);
+      html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">';
+      html += '<span style="min-width:70px;font-size:13px;">' + hall.name + '</span>';
+      html += '<input type="number" id="ag-rebate-' + hall.id + '" class="form-input" style="width:100px;" step="0.001" min="0" max="' + maxPct + '" placeholder="預設' + defaultPct + '" value="' + ratePct + '">';
+      html += '<span style="font-size:12px;color:var(--text-muted);">%</span>';
+      html += '<span style="font-size:11px;color:var(--text-muted);">上限' + maxPct + '%</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '</div>';
+
+    // 分潤預覽區
+    html += '<div id="ag-preview" style="margin-top:12px;padding:12px;background:var(--bg-secondary);border-radius:6px;display:none;font-size:13px;line-height:1.8;"></div>';
+
+    return html;
+  }
+
+  // =========================================================================
+  // 輔助：驗證並收集表單資料
+  // 回傳 { name, shareholderId, profitMode, customRebateRates } 或 null（驗證失敗）
+  // =========================================================================
+  function collectFormData() {
+    var name = document.getElementById('ag-name').value.trim();
+    var shId = document.getElementById('ag-sh').value;
+    var mode = document.getElementById('ag-profit-mode').value;
+
+    if (!name) { Toast.error('代理名稱必填'); return null; }
+
+    var customRates = null;
+    if (mode === PROFIT_MODE.MONTHLY_ONLY) {
+      customRates = {};
+      var halls = getMonthlyRebateHalls();
+      var hasError = false;
+      halls.forEach(function(hall) {
+        var input = document.getElementById('ag-rebate-' + hall.id);
+        if (!input) return;
+        var val = input.value.trim();
+        if (val === '') return; // 留空 = 用預設
+
+        var pct = parseFloat(val);
+        if (isNaN(pct) || pct < 0) {
+          Toast.error(hall.name + ' 月退費率不得為負數');
+          hasError = true;
+          return;
+        }
+        var maxPct = hall.rate * 100;
+        if (pct > maxPct) {
+          Toast.error(hall.name + ' 月退費率不得超過總退佣率 ' + maxPct.toFixed(2) + '%');
+          hasError = true;
+          return;
+        }
+        // 百分比轉小數
+        customRates[hall.id] = pct / 100;
+      });
+      if (hasError) return null;
+
+      // 若全部留空，設為 null（使用全預設）
+      if (Object.keys(customRates).length === 0) customRates = null;
+    }
+
+    return { name: name, shareholderId: shId, profitMode: mode, customRebateRates: customRates };
+  }
+
+  // =========================================================================
+  // 輔助：更新分潤預覽
+  // =========================================================================
+  function updatePreview() {
+    var modeEl = document.getElementById('ag-profit-mode');
+    var preview = document.getElementById('ag-preview');
+    if (!modeEl || !preview) return;
+
+    var mode = modeEl.value;
+    if (mode !== PROFIT_MODE.MONTHLY_ONLY) {
+      preview.style.display = 'none';
+      return;
+    }
+
+    var halls = getMonthlyRebateHalls();
+    var html = '<strong>📊 分潤預覽</strong><br>';
+    html += '<span style="color:var(--danger);">●</span> 現結（盈利）：全退代理，不進錢池<br>';
+    html += '<span style="color:var(--success);">●</span> 月退費：用下方費率進錢池，由所有股東依持股均分<br>';
+    html += '<span style="color:var(--warning);">●</span> 洗碼：計入總洗碼，但不計入所屬股東個人貢獻<br>';
+    html += '<br><strong>各廳月退費率：</strong><br>';
+    halls.forEach(function(hall) {
+      var input = document.getElementById('ag-rebate-' + hall.id);
+      var val = input ? input.value.trim() : '';
+      var defaultPct = (hall.rebateRate * 100).toFixed(3);
+      var ratePct, label;
+      if (val === '' || isNaN(parseFloat(val))) {
+        ratePct = defaultPct;
+        label = '預設';
+      } else {
+        ratePct = parseFloat(val).toFixed(3);
+        label = (parseFloat(val).toFixed(3) === defaultPct) ? '預設' : '自定';
+      }
+      html += hall.name + '：<strong>' + ratePct + '%</strong> (' + label + ')<br>';
+    });
+    preview.innerHTML = html;
+    preview.style.display = 'block';
+  }
+
+  // =========================================================================
+  // 分潤模式切換事件
+  // =========================================================================
+  function onModeChange() {
+    var mode = document.getElementById('ag-profit-mode').value;
+    var ratesDiv = document.getElementById('ag-rebate-rates');
+    if (ratesDiv) ratesDiv.style.display = (mode === PROFIT_MODE.MONTHLY_ONLY) ? 'block' : 'none';
+    updatePreview();
+  }
+
+  // =========================================================================
+  // 新增代理
+  // =========================================================================
   function showAdd() {
     var shareholders = Shareholders.getAll();
     if (shareholders.length === 0) {
       Toast.error('請先在股東頁面新增股東');
       return;
     }
-    var html = '<div class="form-group"><label>代理名稱</label><input type="text" id="ag-name" class="form-input"></div>';
-    html += '<div class="form-group"><label>所屬股東</label>';
-    html += '<select id="ag-sh" class="form-input">';
-    shareholders.forEach(function(sh) { html += '<option value="' + sh.id + '">' + sh.name + '</option>'; });
-    html += '</select></div>';
+    var html = buildForm(null);
     html += '<div style="text-align:right;margin-top:16px;"><button class="btn btn-primary" onclick="AgentPage.save()">儲存</button></div>';
-    Modal.open('新增代理', html);
+    Modal.open('新增代理', html, { onOpen: function() { updatePreview(); } });
   }
 
   function save() {
-    var name = document.getElementById('ag-name').value;
-    var shId = document.getElementById('ag-sh').value;
-    if (!name) { Toast.error('代理名稱必填'); return; }
-    Agents.create({ name: name, shareholderId: shId });
+    var data = collectFormData();
+    if (!data) return;
+    // 審計記錄
+    data._auditLog = [{
+      action: 'create',
+      timestamp: Date.now(),
+      operator: 'web-user',
+    }];
+    Agents.create(data);
     Modal.close();
     Toast.success('代理已新增');
     render();
   }
+
+  // =========================================================================
+  // 編輯代理
+  // =========================================================================
+  function editAgent(id) {
+    var agent = Agents.getById(id);
+    if (!agent) { Toast.error('代理不存在'); return; }
+    var html = buildForm(agent);
+    html += '<div style="text-align:right;margin-top:16px;">';
+    html += '<button class="btn btn-secondary" onclick="Modal.close()" style="margin-right:8px;">取消</button>';
+    html += '<button class="btn btn-primary" onclick="AgentPage.saveEdit(\'' + id + '\')">儲存修改</button>';
+    html += '</div>';
+    Modal.open('編輯代理', html, { onOpen: function() { updatePreview(); } });
+  }
+
+  function saveEdit(id) {
+    var agent = Agents.getById(id);
+    if (!agent) { Toast.error('代理不存在'); return; }
+    var data = collectFormData();
+    if (!data) return;
+
+    // 比較變更，建立審計記錄
+    var changes = {};
+    if (agent.name !== data.name) {
+      changes.name = { from: agent.name, to: data.name };
+    }
+    if (agent.shareholderId !== data.shareholderId) {
+      changes.shareholderId = { from: agent.shareholderId, to: data.shareholderId };
+    }
+    var oldMode = agent.profitMode || PROFIT_MODE.STANDARD;
+    if (oldMode !== data.profitMode) {
+      changes.profitMode = { from: oldMode, to: data.profitMode };
+    }
+    var oldRates = JSON.stringify(agent.customRebateRates || null);
+    var newRates = JSON.stringify(data.customRebateRates || null);
+    if (oldRates !== newRates) {
+      changes.customRebateRates = { from: agent.customRebateRates || null, to: data.customRebateRates };
+    }
+
+    // 附加審計記錄
+    if (Object.keys(changes).length > 0) {
+      var auditLog = agent._auditLog || [];
+      auditLog.push({
+        action: 'update',
+        changes: changes,
+        timestamp: Date.now(),
+        operator: 'web-user',
+      });
+      data._auditLog = auditLog;
+    }
+
+    Agents.update(id, data);
+    Modal.close();
+    Toast.success('代理已更新');
+    render();
+  }
+
+  return {
+    render: render,
+    showAdd: showAdd,
+    save: save,
+    editAgent: editAgent,
+    saveEdit: saveEdit,
+    onModeChange: onModeChange,
+  };
 })();
 
 
@@ -5422,39 +5757,92 @@ var ShareholderPage = (function() {
       return t.date && t.date.substring(0, 7) === _currentMonth;
     });
 
-    // 計算各廳洗碼（優先從團 hallIds 讀取，交易記錄 vipHallId 為後備）
-    var totalWash = 0;
-    var hallWash = {};
-    halls.forEach(function(h) { hallWash[h.id] = 0; });
-    monthTxs.forEach(function(tx) {
-      totalWash += (tx.washCode || 0);
-      var hallId = tx.vipHallId;
+    // 輔助：取得交易廳 ID（優先從團 hallIds 讀取，vipHallId 為後備）
+    function getHallId(tx) {
+      var hallId = tx.vipHallId || 'unknown';
       if (tx.tripId) {
         var trip = Trips.getById(tx.tripId);
         if (trip && Array.isArray(trip.hallIds) && trip.hallIds.length > 0) {
           hallId = trip.hallIds[0];
         }
       }
-      if (hallWash[hallId] !== undefined) {
-        hallWash[hallId] += (tx.washCode || 0);
+      return hallId;
+    }
+
+    // 輔助：判斷交易是否屬於 monthlyOnly 代理
+    function isMonthlyOnlyTx(tx) {
+      if (!tx.agentId || typeof Agents === 'undefined') return false;
+      var agent = Agents.getById(tx.agentId);
+      if (!agent) return false;
+      return agent.profitMode === PROFIT_MODE.MONTHLY_ONLY;
+    }
+
+    // 計算各廳洗碼（全量，含 monthlyOnly）+ 分離標準/monthlyOnly
+    var totalWash = 0;
+    var hallWash = {};             // 全量（含 monthlyOnly）
+    var standardHallWash = {};     // 標準交易
+    var monthlyOnlyHallWash = {};  // monthlyOnly 交易
+    var moAgentHallWash = {};      // monthlyOnly 按 agentId→hallId 分組（供自定月退計算用）
+    halls.forEach(function(h) {
+      hallWash[h.id] = 0;
+      standardHallWash[h.id] = 0;
+      monthlyOnlyHallWash[h.id] = 0;
+    });
+    monthTxs.forEach(function(tx) {
+      var hallId = getHallId(tx);
+      var wash = tx.washCode || 0;
+      totalWash += wash;
+      if (hallWash[hallId] !== undefined) hallWash[hallId] += wash;
+
+      if (isMonthlyOnlyTx(tx)) {
+        if (monthlyOnlyHallWash[hallId] !== undefined) monthlyOnlyHallWash[hallId] += wash;
+        if (!moAgentHallWash[tx.agentId]) moAgentHallWash[tx.agentId] = {};
+        moAgentHallWash[tx.agentId][hallId] = (moAgentHallWash[tx.agentId][hallId] || 0) + wash;
+      } else {
+        if (standardHallWash[hallId] !== undefined) standardHallWash[hallId] += wash;
       }
     });
 
     // 計算各廳盈利(現結)和月退費
+    // 標準交易：盈利=洗碼×現結%, 月退=洗碼×月退%
+    // monthlyOnly交易：盈利不計, 月退=洗碼×代理自定費率(無自定則用廳預設)
     var hallData = {};
-    var totalProfit = 0;   // 盈利(現結)
-    var totalRebate = 0;   // 月退費
+    var totalProfit = 0;   // 盈利(現結，只計標準交易)
+    var totalRebate = 0;   // 月退費（標準+monthlyOnly）
     halls.forEach(function(hall) {
-      var wash = hallWash[hall.id] || 0;
-      var washRaw = wash * 10000;
+      var stdWash = standardHallWash[hall.id] || 0;
+      var moWash = monthlyOnlyHallWash[hall.id] || 0;
+      var allWash = stdWash + moWash;
+      var stdWashRaw = stdWash * 10000;
       var cashRate = hall.cashRate || hall.rate;
-      var profit = washRaw * cashRate;
-      var rebate = hall.hasMonthlyRebate ? washRaw * hall.rebateRate : 0;
-      hallData[hall.id] = { wash: wash, profit: profit, rebate: rebate, total: profit + rebate };
+      var profit = stdWashRaw * cashRate;                           // 只有標準交易現結
+      var stdRebate = hall.hasMonthlyRebate ? stdWashRaw * hall.rebateRate : 0;
+
+      // monthlyOnly 月退：遍歷各代理用自定費率
+      var moRebate = 0;
+      if (hall.hasMonthlyRebate && moWash > 0) {
+        Object.keys(moAgentHallWash).forEach(function(agentId) {
+          var agent = (typeof Agents !== 'undefined') ? Agents.getById(agentId) : null;
+          if (!agent) return;
+          var agentHallWash = moAgentHallWash[agentId][hall.id] || 0;
+          if (agentHallWash === 0) return;
+          var rate = (agent.customRebateRates && typeof agent.customRebateRates[hall.id] === 'number')
+            ? agent.customRebateRates[hall.id]
+            : hall.rebateRate;
+          moRebate += agentHallWash * 10000 * rate;
+        });
+      }
+
+      var rebate = stdRebate + moRebate;
+      hallData[hall.id] = {
+        wash: allWash, standardWash: stdWash, monthlyOnlyWash: moWash,
+        profit: profit, rebate: rebate, standardRebate: stdRebate, monthlyOnlyRebate: moRebate,
+        total: profit + rebate,
+      };
       totalProfit += profit;
       totalRebate += rebate;
     });
-    var grandTotal = totalProfit + totalRebate; // 合計
+    var grandTotal = totalProfit + totalRebate; // 合計（錢池）
 
     // 額外收入
     var extraIncomes = ExtraIncome.getByMonth(_currentMonth);
@@ -5556,6 +5944,8 @@ var ShareholderPage = (function() {
 
       var SH_COLORS = ['#378ADD', '#1D9E75', '#EF9F27', '#D4537E', '#7F77DD'];
       var sumHK = 0, sumTW = 0;
+      var totalPersonalWash = 0;    // 各股東 personalWash 合計（標準交易）
+      var totalMonthlyOnlyWash = 0; // 各股東 monthlyOnlyWash 合計（特殊代理）
       var contribData = [];
       shareholders.forEach(function(sh, idx) {
         var profitData = calcShareholderProfit(sh, monthTxs, settings, _currentMonth);
@@ -5563,6 +5953,8 @@ var ShareholderPage = (function() {
         var extraShare = totalExtra * (sh.shares / totalShares);
         sumHK += totalData.totalPayableHK;
         sumTW += totalData.totalPayableTW;
+        totalPersonalWash += profitData.personalWash;
+        totalMonthlyOnlyWash += (profitData.monthlyOnlyWash || 0);
 
         var contribPct = (totalData.contribution * 100).toFixed(1);
         var barColor = SH_COLORS[idx % SH_COLORS.length];
@@ -5594,13 +5986,33 @@ var ShareholderPage = (function() {
       });
 
       html += '<tr class="total-row">';
-      html += '<td>合計</td><td>' + totalShares + '</td><td>' + fmtWan(totalWash) + '</td>';
-      html += '<td class="num">—</td><td style="text-align:center;">100%</td><td class="num">—</td><td class="num">' + fmtHK(totalExtra) + '</td>';
+      html += '<td>合計</td><td>' + totalShares + '</td>';
+      // 洗碼欄：個人洗碼合計，如有特殊代理附加標註
+      if (totalMonthlyOnlyWash > 0) {
+        html += '<td>' + fmtWan(totalPersonalWash) + ' <span style="font-size:var(--font-size-sm);color:var(--text-secondary);">(+特殊' + fmtWan(totalMonthlyOnlyWash) + ')</span></td>';
+      } else {
+        html += '<td>' + fmtWan(totalPersonalWash) + '</td>';
+      }
+      var totalContribPct = totalWash > 0 ? (totalPersonalWash / totalWash * 100).toFixed(1) : '0.0';
+      html += '<td class="num">—</td><td style="text-align:center;">' + totalContribPct + '%</td><td class="num">—</td><td class="num">' + fmtHK(totalExtra) + '</td>';
       html += '<td class="num">' + fmtHK(sumHK) + '</td>';
       html += '<td class="num num-positive">' + fmtHK(sumTW) + '</td>';
       html += '<td></td>';
       html += '</tr>';
       html += '</tbody></table>';
+
+      // 有特殊代理時顯示口徑說明
+      if (totalMonthlyOnlyWash > 0) {
+        html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);margin-top:6px;">';
+        html += '※ 特殊代理洗碼 ' + fmtWan(totalMonthlyOnlyWash) + ' 萬計入總洗碼但不含個人貢獻，貢獻度合計 ' + totalContribPct + '% < 100%';
+        html += '</p>';
+      }
+
+      // 有特殊代理時，加入灰色段落填補環形圖缺口
+      if (totalMonthlyOnlyWash > 0 && totalWash > 0) {
+        var moPct = totalMonthlyOnlyWash / totalWash * 100;
+        contribData.push({ name: '特殊代理(僅月退)', pct: moPct, wash: totalMonthlyOnlyWash, color: '#aaa' });
+      }
 
       // 貢獻度環形圖 + 貴賓廳明細（左右並排）
       if (contribData.length > 0 && totalWash > 0) {
@@ -5642,9 +6054,19 @@ var ShareholderPage = (function() {
           html += '<td><span class="sh-rate-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:';
           html += hall.id === 'lyi' ? 'var(--hall-lyi)' : hall.id === 'yub' ? 'var(--hall-yub)' : hall.id === 'jm1' ? 'var(--hall-jm1)' : 'var(--hall-jm8)';
           html += ';"></span>' + hall.name + '</td>';
-          html += '<td>' + fmtWan(d.wash) + '</td>';
+          // 洗碼欄：有特殊代理時標註標準/特殊
+          if (d.monthlyOnlyWash > 0) {
+            html += '<td>' + fmtWan(d.wash) + ' <span style="font-size:var(--font-size-sm);color:var(--text-secondary);">(標準' + fmtWan(d.standardWash) + '+特殊' + fmtWan(d.monthlyOnlyWash) + ')</span></td>';
+          } else {
+            html += '<td>' + fmtWan(d.wash) + '</td>';
+          }
           html += '<td>' + fmtHK(d.profit) + '</td>';
-          html += '<td>' + fmtHK(d.rebate) + '</td>';
+          // 月退費欄：有特殊代理月退時標註
+          if (d.monthlyOnlyRebate > 0) {
+            html += '<td>' + fmtHK(d.rebate) + ' <span style="font-size:var(--font-size-sm);color:var(--text-secondary);">(含特殊' + fmtHK(d.monthlyOnlyRebate) + ')</span></td>';
+          } else {
+            html += '<td>' + fmtHK(d.rebate) + '</td>';
+          }
           html += '<td>' + fmtHK(d.total) + '</td>';
           html += '<td>' + sharePct + '%</td>';
           html += '</tr>';
@@ -5741,6 +6163,7 @@ var ShareholderPage = (function() {
       shareholders.forEach(function(sh) {
         var profitData = calcShareholderProfit(sh, monthTxs, settings, _currentMonth);
         var shWash = profitData.personalWash;
+        var moWash = profitData.monthlyOnlyWash || 0;
         var sharePct = totalShares > 0 ? (sh.shares / totalShares * 100).toFixed(1) : '0';
 
         html += '<div class="sh-kpi-card">';
@@ -5758,13 +6181,22 @@ var ShareholderPage = (function() {
           html += '<span class="sh-kpi-hall-val">' + fmtWan(hw) + ' 萬</span>';
           html += '</div>';
         });
-        if (shWash === 0) {
+        if (shWash === 0 && moWash === 0) {
           html += '<div style="font-size:var(--font-size-sm);color:var(--text-muted);text-align:center;padding:8px;">本月無洗碼</div>';
         }
         html += '</div>';
         html += '<div class="sh-kpi-footer">';
-        html += '<label>總洗碼</label>';
-        html += '<span class="sh-kpi-total">' + fmtWan(shWash) + ' 萬</span>';
+        if (moWash > 0) {
+          html += '<label>總洗碼</label>';
+          html += '<span class="sh-kpi-total">' + fmtWan(shWash + moWash) + ' 萬</span>';
+          html += '</div>';
+          html += '<div class="sh-kpi-footer" style="border-top:none;padding-top:0;">';
+          html += '<label style="font-size:var(--font-size-sm);color:var(--text-secondary);">個人 / 特殊</label>';
+          html += '<span style="font-size:var(--font-size-sm);color:var(--text-secondary);">' + fmtWan(shWash) + ' / ' + fmtWan(moWash) + ' 萬</span>';
+        } else {
+          html += '<label>總洗碼</label>';
+          html += '<span class="sh-kpi-total">' + fmtWan(shWash) + ' 萬</span>';
+        }
         html += '</div>';
         html += '</div>';
       });
