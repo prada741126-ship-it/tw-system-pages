@@ -153,8 +153,8 @@ var VIP_HALLS = [
   // rate = 退傭(總) = cashRate(現結/盈利) + rebateRate(月退) + guestRate(客人退佣)
   { id: 'lyi', name: '勵盈會', rate: 0.0123, cashRate: 0.0018, guestRate: 0.01, hasMonthlyRebate: true,  rebateRate: 0.0005 },
   { id: 'yub', name: '御匾會', rate: 0.0120, cashRate: 0.0015, guestRate: 0.01, hasMonthlyRebate: true,  rebateRate: 0.0005 },
-  { id: 'jm1', name: '金門1',  rate: 0.0123, cashRate: 0.0023, guestRate: 0.01, hasMonthlyRebate: false, rebateRate: 0 },
-  { id: 'jm8', name: '金門8',  rate: 0.0118, cashRate: 0.0018, guestRate: 0.01, hasMonthlyRebate: false, rebateRate: 0 },
+  { id: 'jm1', name: '金門1',  rate: 0.0123, cashRate: 0.0023, guestRate: 0.01, hasMonthlyRebate: true,  rebateRate: 0 },
+  { id: 'jm8', name: '金門8',  rate: 0.0118, cashRate: 0.0018, guestRate: 0.01, hasMonthlyRebate: true,  rebateRate: 0 },
 ];
 
 // ============================================================================
