@@ -623,8 +623,16 @@ if (typeof module !== 'undefined' && module.exports) {
 
 // 代理级折抵计算
 function calcAgentQuota(agentId, memberTxs, bookings) {
-  var agentTxs = (memberTxs || []).filter(function(t) { return t.agentId === agentId; });
-  var agentBookings = (bookings || []).filter(function(b) { return b.agentId === agentId; });
+  function _effectiveAgentId(t) {
+    if (t.agentId) return t.agentId;
+    if (typeof Trips !== 'undefined' && t.tripId) {
+      var trip = Trips.getById(t.tripId);
+      return trip ? (trip.agentId || '') : '';
+    }
+    return '';
+  }
+  var agentTxs = (memberTxs || []).filter(function(t) { return _effectiveAgentId(t) === agentId; });
+  var agentBookings = (bookings || []).filter(function(b) { return _effectiveAgentId(b) === agentId; });
 
   var totalWash = agentTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
   var totalThreshold = agentBookings.reduce(function(s, b) {
@@ -2545,12 +2553,32 @@ var PdfExport = (function() {
     var mtxs, bookings, defaultHallId = '';
     if (tripId) {
       var trip = Trips.getById(tripId);
-      mtxs = MemberTxs.getByTrip(tripId).filter(function(t) { return t.agentId === agentId; });
-      bookings = Bookings.getByTrip(tripId).filter(function(b) { return b.agentId === agentId; });
+      mtxs = MemberTxs.getByTrip(tripId).filter(function(t) {
+        var effectiveAgentId = t.agentId || (trip ? trip.agentId : '');
+        return effectiveAgentId === agentId;
+      });
+      bookings = Bookings.getByTrip(tripId).filter(function(b) {
+        var effectiveAgentId = b.agentId || (trip ? trip.agentId : '');
+        return effectiveAgentId === agentId;
+      });
       if (trip && trip.hallIds && trip.hallIds[0]) defaultHallId = trip.hallIds[0];
     } else {
-      mtxs = MemberTxs.getAll().filter(function(t) { return t.agentId === agentId; });
-      bookings = Bookings.getByAgent(agentId);
+      mtxs = MemberTxs.getAll().filter(function(t) {
+        var effectiveAgentId = t.agentId;
+        if (!effectiveAgentId && t.tripId) {
+          var tr = Trips.getById(t.tripId);
+          effectiveAgentId = tr ? (tr.agentId || '') : '';
+        }
+        return effectiveAgentId === agentId;
+      });
+      bookings = Bookings.getAll().filter(function(b) {
+        var effectiveAgentId = b.agentId;
+        if (!effectiveAgentId && b.tripId) {
+          var tr = Trips.getById(b.tripId);
+          effectiveAgentId = tr ? (tr.agentId || '') : '';
+        }
+        return effectiveAgentId === agentId;
+      });
     }
 
     if (mtxs.length === 0 && bookings.length === 0) {
@@ -2589,8 +2617,22 @@ var PdfExport = (function() {
     }
 
     var hasData = agents.some(function(a) {
-      return mtxs.some(function(t) { return t.agentId === a.id; }) ||
-             bookings.some(function(b) { return b.agentId === a.id; });
+      return mtxs.some(function(t) {
+        var effectiveAgentId = t.agentId;
+        if (!effectiveAgentId && t.tripId) {
+          var tr = Trips.getById(t.tripId);
+          effectiveAgentId = tr ? (tr.agentId || '') : '';
+        }
+        return effectiveAgentId === a.id;
+      }) ||
+             bookings.some(function(b) {
+        var effectiveAgentId = b.agentId;
+        if (!effectiveAgentId && b.tripId) {
+          var tr = Trips.getById(b.tripId);
+          effectiveAgentId = tr ? (tr.agentId || '') : '';
+        }
+        return effectiveAgentId === a.id;
+      });
     });
     if (!hasData) {
       Toast.warning('所有代理均無記錄');
@@ -2608,8 +2650,22 @@ var PdfExport = (function() {
 
     var isFirst = true;
     agents.forEach(function(agent) {
-      var agentTxs = mtxs.filter(function(t) { return t.agentId === agent.id; });
-      var agentBookings = bookings.filter(function(b) { return b.agentId === agent.id; });
+      var agentTxs = mtxs.filter(function(t) {
+        var effectiveAgentId = t.agentId;
+        if (!effectiveAgentId && t.tripId) {
+          var tr = Trips.getById(t.tripId);
+          effectiveAgentId = tr ? (tr.agentId || '') : '';
+        }
+        return effectiveAgentId === agent.id;
+      });
+      var agentBookings = bookings.filter(function(b) {
+        var effectiveAgentId = b.agentId;
+        if (!effectiveAgentId && b.tripId) {
+          var tr = Trips.getById(b.tripId);
+          effectiveAgentId = tr ? (tr.agentId || '') : '';
+        }
+        return effectiveAgentId === agent.id;
+      });
       if (agentTxs.length === 0 && agentBookings.length === 0) return;
       html += buildAgentSection(agent, agentTxs, agentBookings, !isFirst, defaultHallId);
       isFirst = false;
@@ -3177,7 +3233,10 @@ var MemberPage = (function() {
       var mtxs = MemberTxs.getByTrip(_selectedTrip);
       // 依代理篩選
       if (_selectedAgent) {
-        mtxs = mtxs.filter(function(t) { return t.agentId === _selectedAgent; });
+        mtxs = mtxs.filter(function(t) {
+          var effectiveAgentId = t.agentId || (trip ? trip.agentId : '');
+          return effectiveAgentId === _selectedAgent;
+        });
       }
 
       html += '<div class="mb-dual-layout">';
@@ -3433,7 +3492,10 @@ var MemberPage = (function() {
         // 整體統計卡片
         var totalWash = 0, totalSettle = 0, totalRooms = 0;
         agents.forEach(function(ag) {
-          var agTxs = tripMtxs.filter(function(t) { return t.agentId === ag.id; });
+          var agTxs = tripMtxs.filter(function(t) {
+            var effectiveAgentId = t.agentId || (trip ? trip.agentId : '');
+            return effectiveAgentId === ag.id;
+          });
           var agWash = agTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
           var agSettle = agTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
           var agRooms = allBookings.filter(function(b) { return b.agentId === ag.id; }).length;
@@ -3456,7 +3518,10 @@ var MemberPage = (function() {
         html += '</tr></thead><tbody>';
         var grandWash = 0, grandSettle = 0;
         agents.forEach(function(ag) {
-          var agTxs = tripMtxs.filter(function(t) { return t.agentId === ag.id; });
+          var agTxs = tripMtxs.filter(function(t) {
+            var effectiveAgentId = t.agentId || (trip ? trip.agentId : '');
+            return effectiveAgentId === ag.id;
+          });
           var agWash = agTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
           var agSettle = agTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
           grandWash += agWash;
@@ -3678,7 +3743,7 @@ var MemberPage = (function() {
     var data = {
       tripId: _selectedTrip,
       memberId: memberId,
-      agentId: m.agentId,
+      agentId: trip.agentId || m.agentId,
       shareholderId: m.shareholderId || trip.shareholderId,
       vipHallId: document.getElementById('tx-hall').value,
       date: new Date().toISOString().slice(0, 10),
@@ -5443,8 +5508,22 @@ var AgentPage = (function() {
     } else {
       agents.forEach(function(agent) {
         var sh = Shareholders.getById(agent.shareholderId);
-        var agentTxs = mtxs.filter(function(t) { return t.agentId === agent.id; });
-        var agentBookings = bookings.filter(function(b) { return b.agentId === agent.id; });
+        var agentTxs = mtxs.filter(function(t) {
+          var effectiveAgentId = t.agentId;
+          if (!effectiveAgentId && t.tripId) {
+            var trip = Trips.getById(t.tripId);
+            effectiveAgentId = trip ? (trip.agentId || '') : '';
+          }
+          return effectiveAgentId === agent.id;
+        });
+        var agentBookings = bookings.filter(function(b) {
+          var effectiveAgentId = b.agentId;
+          if (!effectiveAgentId && b.tripId) {
+            var trip = Trips.getById(b.tripId);
+            effectiveAgentId = trip ? (trip.agentId || '') : '';
+          }
+          return effectiveAgentId === agent.id;
+        });
         var quota = calcAgentQuota(agent.id, mtxs, bookings);
         var totalSettle = agentTxs.reduce(function(s, t) { return s + (t.totalSettlement || 0); }, 0);
         var pct = quota.totalThreshold > 0 ? Math.min(100, (quota.totalWashRaw / quota.totalThreshold) * 100) : 0;
