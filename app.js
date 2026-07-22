@@ -3263,21 +3263,21 @@ var MemberPage = (function() {
           html += '<div class="mb-card-member">' + (m ? m.id : tx.memberId) + ' ' + (m ? m.name : '') + '</div>';
           html += '</div>';
 
-          // 第一區：開工&關帳、出碼、回碼、上下分
+          // 第一區：日期、出碼、回碼、上下分
           html += '<div class="mb-card-section">';
-          html += '<div class="mb-card-row"><span class="mb-card-label">開工&關帳</span><span class="mb-card-val">' + (tx.date || '') + '</span></div>';
-          html += '<div class="mb-card-row"><span class="mb-card-label">出碼</span><span class="mb-card-val">' + fmtCardNum(tx.outCode || 0) + '</span></div>';
-          html += '<div class="mb-card-row"><span class="mb-card-label">回碼</span><span class="mb-card-val">' + fmtCardNum(tx.backCode || 0) + '</span></div>';
-          html += '<div class="mb-card-row"><span class="mb-card-label">上下分</span><span class="mb-card-val ' + (isNeg ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(tx.upDown || 0) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">日期</span><span class="mb-card-val">' + (tx.date || '') + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">出碼</span><span class="mb-card-val">' + fmtCardNum(tx.outCode || 0) + ' HK萬</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">回碼</span><span class="mb-card-val">' + fmtCardNum(tx.backCode || 0) + ' HK萬</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">上下分</span><span class="mb-card-val ' + (isNeg ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(tx.upDown || 0) + ' HK萬</span></div>';
           html += '</div>';
 
           // 第二區：洗碼、倍率、返水、退傭、NT輸贏、小計
           html += '<div class="mb-card-section">';
-          html += '<div class="mb-card-row"><span class="mb-card-label">洗碼數</span><span class="mb-card-val">' + fmtCardNum(tx.washCode || 0) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">洗碼數</span><span class="mb-card-val">' + fmtCardNum(tx.washCode || 0) + ' HK萬</span></div>';
           html += '<div class="mb-card-row"><span class="mb-card-label">倍率</span><span class="mb-card-val">' + (tx.rate1 || 0) + ' / ' + (tx.rate2 || 0) + '</span></div>';
           html += '<div class="mb-card-row"><span class="mb-card-label">返水</span><span class="mb-card-val">' + (tx.rebate1 || 0) + ' / ' + (tx.rebate2 || 0) + '</span></div>';
-          html += '<div class="mb-card-row"><span class="mb-card-label">退傭1</span><span class="mb-card-val">' + fmtNT(tx.commission1) + '</span></div>';
-          html += '<div class="mb-card-row"><span class="mb-card-label">退傭2</span><span class="mb-card-val">' + fmtNT(tx.commission2) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">退傭1</span><span class="mb-card-val">' + Math.trunc((tx.commission1 || 0) * 10000).toLocaleString() + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">退傭2</span><span class="mb-card-val">' + Math.trunc((tx.commission2 || 0) * 10000).toLocaleString() + '</span></div>';
           html += '<div class="mb-card-row"><span class="mb-card-label">NT輸贏</span><span class="mb-card-val ' + ((tx.ntResult || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + fmtNT(tx.ntResult) + '</span></div>';
           html += '<div class="mb-card-row"><span class="mb-card-label">小計</span><span class="mb-card-val ' + ((tx.subtotal || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + Math.round((tx.subtotal || 0) * 10000).toLocaleString() + '</span></div>';
           html += '</div>';
