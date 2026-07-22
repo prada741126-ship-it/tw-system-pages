@@ -3191,7 +3191,7 @@ var MemberPage = (function() {
           html += '<div class="mb-card-row"><span class="mb-card-label">退傭1</span><span class="mb-card-val">' + fmtNT(tx.commission1) + '</span></div>';
           html += '<div class="mb-card-row"><span class="mb-card-label">退傭2</span><span class="mb-card-val">' + fmtNT(tx.commission2) + '</span></div>';
           html += '<div class="mb-card-row"><span class="mb-card-label">NT輸贏</span><span class="mb-card-val ' + ((tx.ntResult || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + fmtNT(tx.ntResult) + '</span></div>';
-          html += '<div class="mb-card-row"><span class="mb-card-label">小計</span><span class="mb-card-val ' + ((tx.subtotal || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + fmtNT(tx.subtotal) + '</span></div>';
+          html += '<div class="mb-card-row"><span class="mb-card-label">小計</span><span class="mb-card-val ' + ((tx.subtotal || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + Math.round((tx.subtotal || 0) * 10000).toLocaleString() + '</span></div>';
           html += '</div>';
 
           // 第三區：開銷明細
