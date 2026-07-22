@@ -3067,6 +3067,14 @@ var OverviewPage = (function() {
     });
   }
 
+  // 帳務/團數據同步後自動刷新
+  EventBus.on(EVENTS.MTX_LOADED, function() {
+    if (Router.getCurrent() === 'overview') render();
+  });
+  EventBus.on(EVENTS.TRIPS_LOADED, function() {
+    if (Router.getCurrent() === 'overview') render();
+  });
+
   return { render: render, showCreateTrip: showCreateTrip, createTrip: createTrip, toggleAllMembers: toggleAllMembers, showEditTrip: showEditTrip, saveEditTrip: saveEditTrip, deleteTrip: deleteTrip, toggleAllMembersEdit: toggleAllMembersEdit };
 
 })();
@@ -3373,6 +3381,11 @@ var MemberPage = (function() {
 
   // Firebase 同步會員資料後自動刷新
   EventBus.on(EVENTS.MEMBERS_LOADED, function() {
+    if (Router.getCurrent() === 'member') render();
+  });
+
+  // 帳務數據同步後自動刷新
+  EventBus.on(EVENTS.MTX_LOADED, function() {
     if (Router.getCurrent() === 'member') render();
   });
 
@@ -5889,6 +5902,11 @@ var AgentPage = (function() {
     render();
   }
 
+  // 帳務數據同步後自動刷新
+  EventBus.on(EVENTS.MTX_LOADED, function() {
+    if (Router.getCurrent() === 'agent') render();
+  });
+
   return {
     render: render,
     showAdd: showAdd,
@@ -6538,6 +6556,11 @@ var ShareholderPage = (function() {
     Toast.success('已刪除');
     render();
   }
+
+  // 帳務數據同步後自動刷新
+  EventBus.on(EVENTS.MTX_LOADED, function() {
+    if (Router.getCurrent() === 'shareholder') render();
+  });
 
   return {
     render: render,
