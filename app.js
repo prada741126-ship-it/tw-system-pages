@@ -3257,9 +3257,9 @@ var MemberPage = (function() {
 
           html += '<div class="mb-card">';
 
-          // 卡片標頭：廳名 + 會員編號 + 客稱
+          // 卡片標頭：廳名 + 日期 + 會員編號 + 客稱
           html += '<div class="mb-card-header">';
-          html += '<div class="mb-card-hall">' + (hall ? hall.name : (tx.vipHallId || '')) + '</div>';
+          html += '<div class="mb-card-hall">' + (hall ? hall.name : (tx.vipHallId || '')) + (tx.date ? ' · ' + tx.date : '') + '</div>';
           html += '<div class="mb-card-member">' + (m ? m.id : tx.memberId) + ' ' + (m ? m.name : '') + '</div>';
           html += '</div>';
 
@@ -3781,6 +3781,8 @@ var MemberPage = (function() {
       html += '<option value="' + h.id + '"' + sel + '>' + h.name + '</option>';
     });
     html += '</select></div>';
+    html += '<div class="form-group"><label>日期</label>';
+    html += '<input type="date" id="tx-date" class="form-input" value="' + (tx.date || '') + '"></div>';
     html += '<div class="form-row">';
     html += '<div class="form-group"><label>出碼(CR)(萬)</label><input type="number" step="0.001" id="tx-out" class="form-input" value="' + fmtNum(tx.outCode || 0) + '" oninput="MemberPage.calcUpDown()"></div>';
     html += '<div class="form-group"><label>回碼(寄碼)(萬)</label><input type="number" step="0.001" id="tx-back" class="form-input" value="' + fmtNum(tx.backCode || 0) + '" oninput="MemberPage.calcUpDown()"></div>';
@@ -3807,6 +3809,7 @@ var MemberPage = (function() {
   function saveEditTx(txId) {
     var patch = {
       vipHallId: document.getElementById('tx-hall').value,
+      date: document.getElementById('tx-date').value,
       outCode: parseFloat(document.getElementById('tx-out').value) || 0,
       backCode: parseFloat(document.getElementById('tx-back').value) || 0,
       washCode: parseFloat(document.getElementById('tx-wash').value) || 0,
