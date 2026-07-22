@@ -1221,6 +1221,31 @@ function _setupWatchers() {
         var local = Store.readArray(w.storeKey);
         var remote = remoteVal ? Object.values(remoteVal) : [];
         var merged = mergeArray(local, remote);
+
+        /* MEMBER_TXS: Bot 只寫入 outCode/backCode/washCode，需重新計算衍生欄位 */
+        if (w.key === 'MEMBER_TXS' && typeof calcMemberTx === 'function') {
+          var recalcCount = 0;
+          merged = merged.map(function(tx) {
+            if (!tx || tx._deleted) return tx;
+            if (tx.outCode === undefined && tx.backCode === undefined && tx.washCode === undefined) return tx;
+            var calcResult = calcMemberTx(tx);
+            var needsUpdate = false;
+            ['upDown', 'ntResult', 'commission1', 'commission2', 'subtotal', 'totalSettlement', 'settlementAmount', 'verifyStatus'].forEach(function(k) {
+              if (calcResult[k] !== undefined && calcResult[k] !== (tx[k] || 0)) {
+                needsUpdate = true;
+              }
+            });
+            if (needsUpdate) {
+              recalcCount++;
+              return Object.assign({}, tx, calcResult);
+            }
+            return tx;
+          });
+          if (recalcCount > 0) {
+            console.log('[Watchers] MEMBER_TXS recalculated', recalcCount, 'transactions');
+          }
+        }
+
         Store.writeArray(w.storeKey, merged);
         State.set(w.key.toLowerCase(), merged);
         EventBus.emit(w.event, merged);
