@@ -1542,6 +1542,8 @@ var Trips = (function() {
     var trip = {
       id: 'T' + dateStr + seq,
       shareholderId: data.shareholderId || '',
+      shareholderIds: data.shareholderIds || [],
+      agentIds: data.agentIds || [],
       vipHallId: data.vipHallId || '',
       hallIds: data.hallIds || [],
       memberIds: data.memberIds || [],
@@ -2778,10 +2780,18 @@ var OverviewPage = (function() {
       html += '<div class="empty-state">目前無進行中的團</div>';
     } else {
       html += '<table class="data-table ov-trips-table"><thead><tr>';
-      html += '<th>團ID</th><th>股東</th><th>廳</th><th>成員</th><th>建立日</th><th>操作</th>';
+      html += '<th>團ID</th><th>上線</th><th>參與股東</th><th>參與代理</th><th>廳</th><th>成員</th><th>建立日</th><th>操作</th>';
       html += '</tr></thead><tbody>';
       activeTrips.forEach(function(trip) {
         var sh = Shareholders.getById(trip.shareholderId);
+        var shNames = (trip.shareholderIds || []).map(function(sid) {
+          var s = Shareholders.getById(sid);
+          return s ? s.name : sid;
+        }).join(', ');
+        var agentNames = (trip.agentIds || []).map(function(aid) {
+          var a = Agents.getById(aid);
+          return a ? a.name : aid;
+        }).join(', ');
         var hallName = (trip.hallIds || []).map(function(hid) {
           var h = VIP_HALLS.find(function(v) { return v.id === hid; });
           return h ? h.name : hid;
@@ -2789,6 +2799,8 @@ var OverviewPage = (function() {
         html += '<tr>';
         html += '<td><span class="ov-trip-id">' + trip.id + '</span></td>';
         html += '<td>' + (sh ? sh.name : trip.shareholderId) + '</td>';
+        html += '<td>' + (shNames || '—') + '</td>';
+        html += '<td>' + (agentNames || '—') + '</td>';
         html += '<td><span class="ov-hall-badge">' + hallName + '</span></td>';
         html += '<td>' + (trip.memberIds || []).length + '人</td>';
         html += '<td>' + (trip.startDate || '') + '</td>';
@@ -2845,6 +2857,7 @@ var OverviewPage = (function() {
 
   function showCreateTrip() {
     var shareholders = Shareholders.getAll();
+    var agents = Agents.getAll();
     var members = Members.getAll();
     var html = '';
     html += '<div class="form-group"><label>股東(上線)</label>';
@@ -2854,6 +2867,33 @@ var OverviewPage = (function() {
       html += '<option value="' + sh.id + '">' + sh.name + ' (持股:' + (sv % 1 === 0 ? sv : sv.toFixed(1)) + ')</option>';
     });
     html += '</select></div>';
+    // 參與股東 — checkbox 列表
+    html += '<div class="form-group"><label>參與股東</label>';
+    if (shareholders.length === 0) {
+      html += '<div style="color:var(--text-muted);padding:12px;">尚無股東</div>';
+    } else {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;">';
+      shareholders.forEach(function(sh) {
+        var sv = sh.shares || 0;
+        html += '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;"><input type="checkbox" class="trip-sh-cb" value="' + sh.id + '"> ' + sh.name + ' (' + (sv % 1 === 0 ? sv : sv.toFixed(1)) + ')</label>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+    // 參與代理 — checkbox 列表
+    html += '<div class="form-group"><label>參與代理</label>';
+    if (agents.length === 0) {
+      html += '<div style="color:var(--text-muted);padding:12px;">尚無代理</div>';
+    } else {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;">';
+      agents.forEach(function(ag) {
+        var sh = Shareholders.getById(ag.shareholderId);
+        var modeLabel = ag.profitMode === 'monthlyOnly' ? '[月]' : '';
+        html += '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;"><input type="checkbox" class="trip-agent-cb" value="' + ag.id + '"> ' + ag.name + modeLabel + (sh ? ' (' + sh.name + ')' : '') + '</label>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
     // 貴賓廳 — checkbox 列表
     html += '<div class="form-group"><label>貴賓廳</label>';
     html += '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;">';
@@ -2884,10 +2924,14 @@ var OverviewPage = (function() {
     var shId = document.getElementById('trip-sh').value;
     var hallIds = Array.from(document.querySelectorAll('.trip-hall-cb:checked')).map(function(cb) { return cb.value; });
     var memberIds = Array.from(document.querySelectorAll('.trip-member-cb:checked')).map(function(cb) { return cb.value; });
+    var shareholderIds = Array.from(document.querySelectorAll('.trip-sh-cb:checked')).map(function(cb) { return cb.value; });
+    var agentIds = Array.from(document.querySelectorAll('.trip-agent-cb:checked')).map(function(cb) { return cb.value; });
     var notes = document.getElementById('trip-notes').value;
 
     var trip = Trips.create({
       shareholderId: shId,
+      shareholderIds: shareholderIds,
+      agentIds: agentIds,
       hallIds: hallIds,
       memberIds: memberIds,
       notes: notes,
@@ -2905,15 +2949,16 @@ var OverviewPage = (function() {
     cbs.forEach(function(cb) { cb.checked = !allChecked; });
   }
 
-  return { render: render, showCreateTrip: showCreateTrip, createTrip: createTrip, toggleAllMembers: toggleAllMembers, showEditTrip: showEditTrip, saveEditTrip: saveEditTrip, deleteTrip: deleteTrip, toggleAllMembersEdit: toggleAllMembersEdit };
-
   function showEditTrip(tripId) {
     var trip = Trips.getById(tripId);
     if (!trip) { Toast.error('團不存在'); return; }
     var shareholders = Shareholders.getAll();
+    var agents = Agents.getAll();
     var members = Members.getAll();
     var tripMemberIds = trip.memberIds || [];
     if (!Array.isArray(tripMemberIds)) tripMemberIds = Object.values(tripMemberIds);
+    var tripShIds = trip.shareholderIds || [];
+    var tripAgentIds = trip.agentIds || [];
     var html = '';
     html += '<div class="form-group"><label>團ID</label><input type="text" class="form-input" value="' + trip.id + '" disabled></div>';
     html += '<div class="form-group"><label>股東(上線)</label>';
@@ -2923,6 +2968,35 @@ var OverviewPage = (function() {
       html += '<option value="' + sh.id + '"' + (trip.shareholderId === sh.id ? ' selected' : '') + '>' + sh.name + ' (持股:' + (sv % 1 === 0 ? sv : sv.toFixed(1)) + ')</option>';
     });
     html += '</select></div>';
+    // 參與股東 — checkbox 列表
+    html += '<div class="form-group"><label>參與股東</label>';
+    if (shareholders.length === 0) {
+      html += '<div style="color:var(--text-muted);padding:12px;">尚無股東</div>';
+    } else {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;">';
+      shareholders.forEach(function(sh) {
+        var sv = sh.shares || 0;
+        var sel = tripShIds.indexOf(sh.id) >= 0 ? ' checked' : '';
+        html += '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;"><input type="checkbox" class="trip-sh-cb-edit" value="' + sh.id + '"' + sel + '> ' + sh.name + ' (' + (sv % 1 === 0 ? sv : sv.toFixed(1)) + ')</label>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+    // 參與代理 — checkbox 列表
+    html += '<div class="form-group"><label>參與代理</label>';
+    if (agents.length === 0) {
+      html += '<div style="color:var(--text-muted);padding:12px;">尚無代理</div>';
+    } else {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;">';
+      agents.forEach(function(ag) {
+        var sh = Shareholders.getById(ag.shareholderId);
+        var modeLabel = ag.profitMode === 'monthlyOnly' ? '[月]' : '';
+        var sel = tripAgentIds.indexOf(ag.id) >= 0 ? ' checked' : '';
+        html += '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;"><input type="checkbox" class="trip-agent-cb-edit" value="' + ag.id + '"' + sel + '> ' + ag.name + modeLabel + (sh ? ' (' + sh.name + ')' : '') + '</label>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
     // 貴賓廳 — checkbox 列表
     html += '<div class="form-group"><label>貴賓廳</label>';
     html += '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;">';
@@ -2955,9 +3029,13 @@ var OverviewPage = (function() {
     var shId = document.getElementById('trip-sh-edit').value;
     var hallIds = Array.from(document.querySelectorAll('.trip-hall-cb-edit:checked')).map(function(cb) { return cb.value; });
     var memberIds = Array.from(document.querySelectorAll('.trip-member-cb-edit:checked')).map(function(cb) { return cb.value; });
+    var shareholderIds = Array.from(document.querySelectorAll('.trip-sh-cb-edit:checked')).map(function(cb) { return cb.value; });
+    var agentIds = Array.from(document.querySelectorAll('.trip-agent-cb-edit:checked')).map(function(cb) { return cb.value; });
     var notes = document.getElementById('trip-notes-edit').value;
     Trips.update(tripId, {
       shareholderId: shId,
+      shareholderIds: shareholderIds,
+      agentIds: agentIds,
       hallIds: hallIds,
       memberIds: memberIds,
       notes: notes,
@@ -2984,6 +3062,9 @@ var OverviewPage = (function() {
       render();
     });
   }
+
+  return { render: render, showCreateTrip: showCreateTrip, createTrip: createTrip, toggleAllMembers: toggleAllMembers, showEditTrip: showEditTrip, saveEditTrip: saveEditTrip, deleteTrip: deleteTrip, toggleAllMembersEdit: toggleAllMembersEdit };
+
 })();
 
 
