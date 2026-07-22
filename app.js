@@ -4404,6 +4404,10 @@ var RoomPage = (function() {
     html += '</select></div>';
     html += '<div class="form-group"><label>向客人收</label><input type="number" id="eb-charge-guest" class="form-input" value="' + (b.chargeGuest || 0) + '"></div>';
     html += '</div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>入住日</label><input type="date" id="eb-checkin" class="form-input" value="' + (b.checkIn || '').slice(0, 10) + '"></div>';
+    html += '<div class="form-group"><label>退房日</label><input type="date" id="eb-checkout" class="form-input" value="' + (b.checkOut || '').slice(0, 10) + '"></div>';
+    html += '</div>';
     html += '<div style="text-align:right;margin-top:16px;">';
     html += '<button class="btn btn-primary" onclick="RoomPage.saveEditBooking(\'' + id + '\')">儲存</button></div>';
     Modal.open('編輯訂房', html);
@@ -4417,6 +4421,8 @@ var RoomPage = (function() {
       memberId: document.getElementById('eb-member').value || null,
       feeManualOverride: true,
       chargeGuest: parseFloat(document.getElementById('eb-charge-guest').value) || 0,
+      checkIn: document.getElementById('eb-checkin').value,
+      checkOut: document.getElementById('eb-checkout').value,
     });
     Modal.close();
     Toast.success('訂房已更新');
