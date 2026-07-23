@@ -2591,10 +2591,10 @@ var PdfExport = (function() {
     var old = document.getElementById('pdf-export-container');
     if (old && old.parentNode) old.parentNode.removeChild(old);
 
-    /* 建立離屏容器（visible 但在螢幕外） */
+    /* 建立離屏容器（fixed 定位，z-index:-1 讓 html2canvas 能渲染但用戶看不到） */
     var container = document.createElement('div');
     container.id = 'pdf-export-container';
-    container.style.cssText = 'position:absolute;left:-9999px;top:0;width:1120px;background:#ffffff;padding:20px;';
+    container.style.cssText = 'position:fixed;left:0;top:0;width:1120px;background:#ffffff;padding:20px;z-index:-1;color:#1a1a2e;line-height:1.6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft JhengHei",sans-serif;';
     container.innerHTML = htmlContent;
     document.body.appendChild(container);
 
