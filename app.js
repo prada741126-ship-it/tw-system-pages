@@ -3331,8 +3331,8 @@ var MemberPage = (function() {
         var selectedTripObj = Trips.getById(_selectedTrip);
         mtxs.forEach(function(tx) {
           var m = Members.getById(tx.memberId);
-          // 優先從團的 hallIds 讀取貴賓廳，若團無設定則回退到交易記錄的 vipHallId
-          var hallId = (selectedTripObj && selectedTripObj.hallIds && selectedTripObj.hallIds[0]) || tx.vipHallId || '';
+          // 優先顯示交易自身指定的貴賓廳，若無指定才回退到團的預設廳
+          var hallId = tx.vipHallId || (selectedTripObj && selectedTripObj.hallIds && selectedTripObj.hallIds[0]) || '';
           var hall = VIP_HALLS.find(function(h) { return h.id === hallId; });
           var isNeg = (tx.upDown || 0) < 0;
 
