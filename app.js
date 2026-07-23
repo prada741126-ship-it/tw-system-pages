@@ -743,7 +743,8 @@ function calcShareholderProfit(shareholder, allTxs, settings, month) {
   // 各廳盈利（現結）和月退費分開計算
   var hallProfit = {};
   var totalProfit = 0;   // 盈利(現結)
-  var monthlyRebate = 0; // 月退費
+  var monthlyRebate = 0; // 月退費（標準+特殊）
+  var monthlyOnlyRebate = 0; // 特殊代理月退費（僅 monthlyOnly）
 
   // 標準交易：按現有邏輯計算各廳盈利和月退費
   halls.forEach(function(hall) {
@@ -771,11 +772,13 @@ function calcShareholderProfit(shareholder, allTxs, settings, month) {
         ? agent.customRebateRates[hallId]
         : hall.rebateRate;
       var moWash = hallsForAgent[hallId];
-      monthlyRebate += moWash * 10000 * rate;
+      var moRebateAmt = moWash * 10000 * rate;
+      monthlyRebate += moRebateAmt;
+      monthlyOnlyRebate += moRebateAmt;
     });
   });
 
-  // totalProfit 用於分潤計算 = 盈利 + 月退費 = 合計
+  // totalProfit 用於分潤計算 = 盈利 + 月退費 = 合計（含標準+特殊）
   totalProfit += monthlyRebate;
 
   return {
@@ -787,35 +790,45 @@ function calcShareholderProfit(shareholder, allTxs, settings, month) {
     hallWash: hallWash,                  // 全量洗碼（含 monthlyOnly，供分布表用）
     hallProfit: hallProfit,              // 標準交易盈利（含 wash + profit）
     totalProfit: totalProfit,
-    monthlyRebate: monthlyRebate,
+    monthlyRebate: monthlyRebate,        // 總月退費（標準+特殊）
+    monthlyOnlyRebate: monthlyOnlyRebate, // 特殊代理月退費（僅 monthlyOnly）
     exchangeRate: exchangeRate,
   };
 }
 
 // 合计应付计算（需要所有股东数据）
-function calcShareholderTotal(profitData, allShareholders, totalWash, totalProfit, extraProfit) {
+// monthlyOnlyRebateTotal: 全公司特殊代理月退總額，100%按持股均分，不參與50/50拆分
+function calcShareholderTotal(profitData, allShareholders, totalWash, totalProfit, extraProfit, monthlyOnlyRebateTotal) {
   var totalShares = allShareholders.reduce(function(s, sh) { return s + (sh.shares || 0); }, 0);
   var sh = profitData.shares || 0;
+  var moRebate = monthlyOnlyRebateTotal || 0;
 
-  // 资金股50% = (总盈利 × 个人持股/总股) / 2 + (额外盈利 × 个人持股/总股)
-  var capital50 = (totalProfit * sh / totalShares) / 2 + (extraProfit * sh / totalShares);
+  // 標準部分 = grandTotal − 特殊代理月退（走原50/50拆分）
+  var standardGrand = totalProfit - moRebate;
 
-  // 贡献度 = 个人洗码 / 总洗码
+  // 資金股 = 標準部分50%按持股 + 額外收入按持股
+  var capital50 = (standardGrand * sh / totalShares) / 2 + (extraProfit * sh / totalShares);
+
+  // 貢獻度 = 個人標準洗碼 / 總洗碼
   var contribution = totalWash > 0 ? profitData.personalWash / totalWash : 0;
 
-  // 贡献可得 = (总盈利 / 2) × 贡献度
-  var contribution50 = (totalProfit / 2) * contribution;
+  // 貢獻可得 = (標準部分 / 2) × 貢獻度
+  var contribution50 = (standardGrand / 2) * contribution;
 
-  // 合计应付HK
-  var totalPayableHK = capital50 + contribution50;
+  // 特殊代理月退 100% 按持股均分
+  var moRebateShare = moRebate * sh / totalShares;
 
-  // 合计应付TW = ROUNDDOWN(合计应付HK × 匯率, -2)
+  // 合計應付HK = 資金股 + 貢獻可得 + 特殊月退分潤
+  var totalPayableHK = capital50 + contribution50 + moRebateShare;
+
+  // 合計應付TW = ROUNDDOWN(合計應付HK × 匯率, -2)
   var totalPayableTW = roundDown(totalPayableHK * profitData.exchangeRate, -2);
 
   return {
     capital50: capital50,
     contribution: contribution,
     contribution50: contribution50,
+    moRebateShare: moRebateShare,
     totalPayableHK: totalPayableHK,
     totalPayableTW: totalPayableTW,
   };
@@ -6015,6 +6028,7 @@ var ShareholderPage = (function() {
     var hallData = {};
     var totalProfit = 0;   // 盈利(現結，只計標準交易)
     var totalRebate = 0;   // 月退費（標準+monthlyOnly）
+    var totalMonthlyOnlyRebate = 0; // 特殊代理月退（僅 monthlyOnly，100%按持股分）
     halls.forEach(function(hall) {
       var stdWash = standardHallWash[hall.id] || 0;
       var moWash = monthlyOnlyHallWash[hall.id] || 0;
@@ -6047,6 +6061,7 @@ var ShareholderPage = (function() {
       };
       totalProfit += profit;
       totalRebate += rebate;
+      totalMonthlyOnlyRebate += moRebate;
     });
     var grandTotal = totalProfit + totalRebate; // 合計（錢池）
 
@@ -6144,7 +6159,7 @@ var ShareholderPage = (function() {
     if (shareholders.length > 0 && totalShares > 0) {
       html += '<table class="sh-profit-table"><thead><tr>';
       html += '<th>股東</th><th>持股</th><th>洗碼(萬)</th>';
-      html += '<th class="num">資金股50%(HK)</th><th style="text-align:center;">貢獻度</th><th class="num">貢獻可得(HK)</th><th class="num">額外收入(HK)</th>';
+      html += '<th class="num">資金股50%(HK)</th><th style="text-align:center;">貢獻度</th><th class="num">貢獻可得(HK)</th><th class="num">特殊月退(HK)</th><th class="num">額外收入(HK)</th>';
       html += '<th class="num">合計應付(HK)</th><th class="num">合計應付(TW)</th><th style="text-align:center;">操作</th>';
       html += '</tr></thead><tbody>';
 
@@ -6155,7 +6170,7 @@ var ShareholderPage = (function() {
       var contribData = [];
       shareholders.forEach(function(sh, idx) {
         var profitData = calcShareholderProfit(sh, monthTxs, settings, _currentMonth);
-        var totalData = calcShareholderTotal(profitData, shareholders, totalWash, grandTotal, totalExtra);
+        var totalData = calcShareholderTotal(profitData, shareholders, totalWash, grandTotal, totalExtra, totalMonthlyOnlyRebate);
         var extraShare = totalExtra * (sh.shares / totalShares);
         sumHK += totalData.totalPayableHK;
         sumTW += totalData.totalPayableTW;
@@ -6181,6 +6196,7 @@ var ShareholderPage = (function() {
         html += '</div>';
         html += '</td>';
         html += '<td class="num">' + fmtHK(totalData.contribution50) + '</td>';
+        html += '<td class="num">' + fmtHK(totalData.moRebateShare) + '</td>';
         html += '<td class="num">' + fmtHK(extraShare) + '</td>';
         html += '<td class="num">' + fmtHK(totalData.totalPayableHK) + '</td>';
         html += '<td class="num num-positive">' + fmtHK(totalData.totalPayableTW) + '</td>';
@@ -6200,7 +6216,7 @@ var ShareholderPage = (function() {
         html += '<td>' + fmtWan(totalPersonalWash) + '</td>';
       }
       var totalContribPct = totalWash > 0 ? (totalPersonalWash / totalWash * 100).toFixed(1) : '0.0';
-      html += '<td class="num">—</td><td style="text-align:center;">' + totalContribPct + '%</td><td class="num">—</td><td class="num">' + fmtHK(totalExtra) + '</td>';
+      html += '<td class="num">—</td><td style="text-align:center;">' + totalContribPct + '%</td><td class="num">—</td><td class="num">' + fmtHK(totalMonthlyOnlyRebate) + '</td><td class="num">' + fmtHK(totalExtra) + '</td>';
       html += '<td class="num">' + fmtHK(sumHK) + '</td>';
       html += '<td class="num num-positive">' + fmtHK(sumTW) + '</td>';
       html += '<td></td>';
@@ -6211,6 +6227,7 @@ var ShareholderPage = (function() {
       if (totalMonthlyOnlyWash > 0) {
         html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);margin-top:6px;">';
         html += '※ 特殊代理洗碼 ' + fmtWan(totalMonthlyOnlyWash) + ' 萬計入總洗碼但不含個人貢獻，貢獻度合計 ' + totalContribPct + '% < 100%';
+        html += '<br>※ 特殊代理月退 ' + fmtHK(totalMonthlyOnlyRebate) + ' 不參與50/50拆分，100%按持股均分（特殊月退欄位）';
         html += '</p>';
       }
 
