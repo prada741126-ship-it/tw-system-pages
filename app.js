@@ -694,16 +694,16 @@ function calcShareholderProfit(shareholder, allTxs, settings, month) {
   // 该股东线下所有交易
   var shTxs = (allTxs || []).filter(function(t) { return t.shareholderId === sId; });
 
-  // 輔助：取得交易廳 ID（優先從團 hallIds 讀取，vipHallId 為後備）
+  // 輔助：取得交易廳 ID（交易自身 vipHallId 優先，無指定才回退到團 hallIds）
   function getHallId(t) {
-    var hallId = t.vipHallId || 'unknown';
+    if (t.vipHallId) return t.vipHallId;
     if (t.tripId && typeof Trips !== 'undefined') {
       var trip = Trips.getById(t.tripId);
       if (trip && Array.isArray(trip.hallIds) && trip.hallIds.length > 0) {
-        hallId = trip.hallIds[0];
+        return trip.hallIds[0];
       }
     }
-    return hallId;
+    return 'unknown';
   }
 
   // 輔助：判斷交易是否屬於 monthlyOnly 代理
@@ -2812,8 +2812,8 @@ var OverviewPage = (function() {
     var totalMonthWash = 0;
     VIP_HALLS.forEach(function(h) { hallWash[h.id] = 0; });
     monthTxs.forEach(function(tx) {
-      var hallId = tx.vipHallId;
-      if (tx.tripId) {
+      var hallId = tx.vipHallId || 'unknown';
+      if (!tx.vipHallId && tx.tripId) {
         var trip = Trips.getById(tx.tripId);
         if (trip && Array.isArray(trip.hallIds) && trip.hallIds.length > 0) hallId = trip.hallIds[0];
       }
@@ -6043,16 +6043,16 @@ var ShareholderPage = (function() {
       return t.date && t.date.substring(0, 7) === _currentMonth;
     });
 
-    // 輔助：取得交易廳 ID（優先從團 hallIds 讀取，vipHallId 為後備）
+    // 輔助：取得交易廳 ID（交易自身 vipHallId 優先，無指定才回退到團 hallIds）
     function getHallId(tx) {
-      var hallId = tx.vipHallId || 'unknown';
+      if (tx.vipHallId) return tx.vipHallId;
       if (tx.tripId) {
         var trip = Trips.getById(tx.tripId);
         if (trip && Array.isArray(trip.hallIds) && trip.hallIds.length > 0) {
-          hallId = trip.hallIds[0];
+          return trip.hallIds[0];
         }
       }
-      return hallId;
+      return 'unknown';
     }
 
     // 輔助：判斷交易是否屬於 monthlyOnly 代理
