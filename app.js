@@ -1222,16 +1222,16 @@ function initWatchers() {
 
 function _setupWatchers() {
   var watchList = [
-    { key: 'MEMBERS',       storeKey: STORAGE_KEYS.MEMBERS,       event: EVENTS.MEMBERS_LOADED },
-    { key: 'AGENTS',        storeKey: STORAGE_KEYS.AGENTS,        event: EVENTS.AGENTS_LOADED },
-    { key: 'SHAREHOLDERS',  storeKey: STORAGE_KEYS.SHAREHOLDERS,  event: EVENTS.SHAREHOLDERS_LOADED },
-    { key: 'TRIPS',         storeKey: STORAGE_KEYS.TRIPS,         event: EVENTS.TRIPS_LOADED },
-    { key: 'MEMBER_TXS',    storeKey: STORAGE_KEYS.MEMBER_TXS,    event: EVENTS.MTX_LOADED },
-    { key: 'BOOKINGS',      storeKey: STORAGE_KEYS.BOOKINGS,      event: EVENTS.BOOKINGS_LOADED },
-    { key: 'SUPPLEMENTS',   storeKey: STORAGE_KEYS.SUPPLEMENTS,   event: EVENTS.SYNC_COMPLETE },
-    { key: 'SETTINGS',      storeKey: STORAGE_KEYS.SETTINGS,      event: EVENTS.SETTINGS_LOADED },
-    { key: 'EXTRA_INCOME',  storeKey: STORAGE_KEYS.EXTRA_INCOME,  event: EVENTS.SYNC_COMPLETE },
-    { key: 'HOTEL_CONFIG',  storeKey: STORAGE_KEYS.HOTEL_CONFIG,  event: EVENTS.HOTEL_CONFIG_LOADED },
+    { key: 'MEMBERS',       storeKey: STORAGE_KEYS.MEMBERS,       event: EVENTS.MEMBERS_LOADED,       stateKey: 'members' },
+    { key: 'AGENTS',        storeKey: STORAGE_KEYS.AGENTS,        event: EVENTS.AGENTS_LOADED,        stateKey: 'agents' },
+    { key: 'SHAREHOLDERS',  storeKey: STORAGE_KEYS.SHAREHOLDERS,  event: EVENTS.SHAREHOLDERS_LOADED,  stateKey: 'shareholders' },
+    { key: 'TRIPS',         storeKey: STORAGE_KEYS.TRIPS,         event: EVENTS.TRIPS_LOADED,         stateKey: 'trips' },
+    { key: 'MEMBER_TXS',    storeKey: STORAGE_KEYS.MEMBER_TXS,    event: EVENTS.MTX_LOADED,           stateKey: 'memberTxs' },
+    { key: 'BOOKINGS',      storeKey: STORAGE_KEYS.BOOKINGS,      event: EVENTS.BOOKINGS_LOADED,      stateKey: 'bookings' },
+    { key: 'SUPPLEMENTS',   storeKey: STORAGE_KEYS.SUPPLEMENTS,   event: EVENTS.SYNC_COMPLETE,        stateKey: 'supplements' },
+    { key: 'SETTINGS',      storeKey: STORAGE_KEYS.SETTINGS,      event: EVENTS.SETTINGS_LOADED,      stateKey: 'settings' },
+    { key: 'EXTRA_INCOME',  storeKey: STORAGE_KEYS.EXTRA_INCOME,  event: EVENTS.SYNC_COMPLETE,        stateKey: 'extraIncome' },
+    { key: 'HOTEL_CONFIG',  storeKey: STORAGE_KEYS.HOTEL_CONFIG,  event: EVENTS.HOTEL_CONFIG_LOADED,  stateKey: 'hotelConfig' },
   ];
 
   watchList.forEach(function(w) {
@@ -1270,7 +1270,7 @@ function _setupWatchers() {
         }
 
         Store.writeArray(w.storeKey, merged);
-        State.set(w.key.toLowerCase(), merged);
+        State.set(w.stateKey, merged);
         EventBus.emit(w.event, merged);
       } catch(e) {
         console.error('[Watchers] ' + w.key, e);
@@ -1329,16 +1329,16 @@ function _resyncAll() {
     FB_PATH.HOTEL_CONFIG,
   ];
   var storeMap = {
-    'taiwan_data/members':       { storeKey: STORAGE_KEYS.MEMBERS,       event: EVENTS.MEMBERS_LOADED },
-    'taiwan_data/agents':        { storeKey: STORAGE_KEYS.AGENTS,        event: EVENTS.AGENTS_LOADED },
-    'taiwan_data/shareholders':  { storeKey: STORAGE_KEYS.SHAREHOLDERS,  event: EVENTS.SHAREHOLDERS_LOADED },
-    'taiwan_data/trips':         { storeKey: STORAGE_KEYS.TRIPS,         event: EVENTS.TRIPS_LOADED },
-    'taiwan_data/memberTxs':     { storeKey: STORAGE_KEYS.MEMBER_TXS,    event: EVENTS.MTX_LOADED },
-    'taiwan_data/bookings':      { storeKey: STORAGE_KEYS.BOOKINGS,      event: EVENTS.BOOKINGS_LOADED },
-    'taiwan_data/supplements':   { storeKey: STORAGE_KEYS.SUPPLEMENTS,   event: EVENTS.SYNC_COMPLETE },
-    'taiwan_data/settings':      { storeKey: STORAGE_KEYS.SETTINGS,      event: EVENTS.SETTINGS_LOADED },
-    'taiwan_data/extraIncome':   { storeKey: STORAGE_KEYS.EXTRA_INCOME,  event: EVENTS.SYNC_COMPLETE },
-    'taiwan_data/hotelConfig':   { storeKey: STORAGE_KEYS.HOTEL_CONFIG,  event: EVENTS.HOTEL_CONFIG_LOADED },
+    'taiwan_data/members':       { storeKey: STORAGE_KEYS.MEMBERS,       event: EVENTS.MEMBERS_LOADED,       stateKey: 'members' },
+    'taiwan_data/agents':        { storeKey: STORAGE_KEYS.AGENTS,        event: EVENTS.AGENTS_LOADED,        stateKey: 'agents' },
+    'taiwan_data/shareholders':  { storeKey: STORAGE_KEYS.SHAREHOLDERS,  event: EVENTS.SHAREHOLDERS_LOADED,  stateKey: 'shareholders' },
+    'taiwan_data/trips':         { storeKey: STORAGE_KEYS.TRIPS,         event: EVENTS.TRIPS_LOADED,         stateKey: 'trips' },
+    'taiwan_data/memberTxs':     { storeKey: STORAGE_KEYS.MEMBER_TXS,    event: EVENTS.MTX_LOADED,           stateKey: 'memberTxs' },
+    'taiwan_data/bookings':      { storeKey: STORAGE_KEYS.BOOKINGS,      event: EVENTS.BOOKINGS_LOADED,      stateKey: 'bookings' },
+    'taiwan_data/supplements':   { storeKey: STORAGE_KEYS.SUPPLEMENTS,   event: EVENTS.SYNC_COMPLETE,        stateKey: 'supplements' },
+    'taiwan_data/settings':      { storeKey: STORAGE_KEYS.SETTINGS,      event: EVENTS.SETTINGS_LOADED,      stateKey: 'settings' },
+    'taiwan_data/extraIncome':   { storeKey: STORAGE_KEYS.EXTRA_INCOME,  event: EVENTS.SYNC_COMPLETE,        stateKey: 'extraIncome' },
+    'taiwan_data/hotelConfig':   { storeKey: STORAGE_KEYS.HOTEL_CONFIG,  event: EVENTS.HOTEL_CONFIG_LOADED,  stateKey: 'hotelConfig' },
   };
 
   syncPaths.forEach(function(path) {
@@ -1360,7 +1360,7 @@ function _resyncAll() {
       }
 
       Store.writeArray(cfg.storeKey, merged);
-      State.set(cfg.storeKey.split('_').slice(1).join('').toLowerCase(), merged);
+      State.set(cfg.stateKey, merged);
       EventBus.emit(cfg.event, merged);
     }).catch(function(e) {
       console.error('[Watchers] _resyncAll failed for ' + path, e);
