@@ -2459,6 +2459,13 @@ var PdfExport = (function() {
       .replace(/"/g, '&quot;');
   }
 
+  /* 客名遮罩 */
+  function maskName(name) {
+    if (!name) return '';
+    if (name.length <= 2) return name[0] + '*';
+    return name[0] + '*'.repeat(name.length - 2) + name[name.length - 1];
+  }
+
   function buildPage(title, subtitle, tripInfo, sectionsHtml) {
     var now = new Date();
     var mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -2475,6 +2482,30 @@ var PdfExport = (function() {
     html += '.date{text-align:center;font-size:10px;color:#aaa;margin-bottom:16px;}';
     html += '.section{margin-bottom:20px;page-break-inside:avoid;}';
     html += '.section-title{font-size:14px;font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:2px solid #333;}';
+
+    /* 代理汇总 */
+    html += '.agent-header{background:#2c3e50;color:#fff;padding:10px 14px;border-radius:4px 4px 0 0;display:flex;justify-content:space-between;align-items:center;}';
+    html += '.agent-name{font-size:15px;font-weight:bold;}';
+    html += '.agent-sh{font-size:12px;opacity:0.9;}';
+    html += '.quota-section{padding:10px 14px;background:#f5f6fa;border-left:1px solid #bbb;border-right:1px solid #bbb;border-bottom:1px solid #bbb;border-radius:0 0 4px 4px;margin-bottom:12px;}';
+    html += '.quota-info{display:flex;gap:16px;font-size:12px;margin-bottom:6px;}';
+    html += '.quota-info .met{color:#27ae60;font-weight:bold;}';
+    html += '.quota-info .unmet{color:#e67e22;font-weight:bold;}';
+    html += '.quota-bar{height:8px;background:#e0e0e0;border-radius:4px;overflow:hidden;}';
+    html += '.quota-fill{height:100%;background:#3498db;border-radius:4px;}';
+    html += '.summary-table{width:100%;border-collapse:collapse;font-size:11px;margin:12px 0;}';
+    html += '.summary-table th,.summary-table td{border:1px solid #bbb;padding:6px 10px;}';
+    html += '.summary-table th{background:#e8e8e8;text-align:center;font-weight:bold;}';
+    html += '.summary-table td.num{text-align:right;}';
+    html += '.summary-table .total-row{background:#f0f0f0;font-weight:bold;}';
+    html += '.summary-table .negative{color:#c0392b;}';
+    html += '.summary-table .positive{color:#27ae60;}';
+    html += '.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0;}';
+    html += '.stat-card{border:1px solid #ddd;border-radius:6px;padding:10px;text-align:center;background:#fafafa;}';
+    html += '.stat-label{font-size:11px;color:#666;margin-bottom:4px;}';
+    html += '.stat-val{font-size:14px;font-weight:bold;}';
+    html += '.stat-val.negative{color:#c0392b;}';
+    html += '.stat-val.positive{color:#27ae60;}';
 
     /* 會員帳卡 */
     html += '.tx-card{border:1px solid #bbb;border-radius:6px;margin-bottom:16px;page-break-inside:avoid;overflow:hidden;}';
@@ -2530,7 +2561,6 @@ var PdfExport = (function() {
   /* === 單筆交易帳卡（仿網頁 mb-card） === */
   function buildTxCard(tx, defaultHallId) {
     var m = Members.getById(tx.memberId);
-    // 廳別：優先交易自身指定，其次團預設
     var hallId = tx.vipHallId || defaultHallId || '';
     var hall = VIP_HALLS.find(function(h) { return h.id === hallId; });
     var hallName = hall ? hall.name : hallId;
@@ -2541,7 +2571,6 @@ var PdfExport = (function() {
 
     var html = '<div class="tx-card">';
 
-    // 標頭
     html += '<div class="tx-card-header">';
     html += '<div class="tx-card-hall">' + _escapeHtml(hallName) + (tx.date ? ' · ' + tx.date : '') + '</div>';
     html += '<div class="tx-card-member">' + _escapeHtml(m ? m.id : tx.memberId) + ' ' + _escapeHtml(m ? m.name : '') + '</div>';
@@ -2549,7 +2578,6 @@ var PdfExport = (function() {
 
     html += '<div class="tx-card-body">';
 
-    // 第一區：日期、出碼、回碼、上下分
     html += '<div class="tx-card-section">';
     html += '<div class="tx-card-row"><span class="tx-card-label">日期</span><span class="tx-card-val">' + _escapeHtml(tx.date || '') + '</span></div>';
     html += '<div class="tx-card-row"><span class="tx-card-label">出碼</span><span class="tx-card-val">' + fmtCardNum(tx.outCode || 0) + ' HK萬</span></div>';
@@ -2557,7 +2585,6 @@ var PdfExport = (function() {
     html += '<div class="tx-card-row"><span class="tx-card-label">上下分</span><span class="tx-card-val ' + (isNeg ? 'negative' : 'positive') + '">' + fmtCardNum(tx.upDown || 0) + ' HK萬</span></div>';
     html += '</div>';
 
-    // 第二區：洗碼、倍率、返水、退傭、NT輸贏、小計
     html += '<div class="tx-card-section">';
     html += '<div class="tx-card-row"><span class="tx-card-label">洗碼數</span><span class="tx-card-val">' + fmtCardNum(tx.washCode || 0) + ' HK萬</span></div>';
     html += '<div class="tx-card-row"><span class="tx-card-label">倍率</span><span class="tx-card-val">' + (tx.rate1 || 0) + ' / ' + (tx.rate2 || 0) + '</span></div>';
@@ -2568,7 +2595,6 @@ var PdfExport = (function() {
     html += '<div class="tx-card-row"><span class="tx-card-label">小計</span><span class="tx-card-val ' + ((tx.subtotal || 0) < 0 ? 'negative' : 'positive') + '">' + fmtNum(Math.round((tx.subtotal || 0) * 10000)) + '</span></div>';
     html += '</div>';
 
-    // 第三區：開銷明細
     html += '<div class="tx-card-section">';
     html += '<div class="tx-card-section-title">開銷明細</div>';
     if (expenses.length === 0) {
@@ -2591,15 +2617,14 @@ var PdfExport = (function() {
     }
     html += '</div>';
 
-    html += '</div>'; // tx-card-body
+    html += '</div>';
 
-    // 底部總交收
     html += '<div class="tx-card-footer">';
     html += '<span class="tx-card-total-label">總交收金額NT</span>';
     html += '<span class="tx-card-total-val ' + (isWin ? 'positive' : 'negative') + '">' + fmtNum(Math.round(totalNT)) + '</span>';
     html += '</div>';
 
-    html += '</div>'; // tx-card
+    html += '</div>';
     return html;
   }
 
@@ -2639,18 +2664,80 @@ var PdfExport = (function() {
     return html;
   }
 
+  /* === 代理區塊：含代理匯總 + 會員帳卡明細 + 房間記錄 === */
   function buildAgentSection(agent, txs, bookings, pageBreak, defaultHallId) {
     var cls = pageBreak ? ' class="page-break"' : '';
     var html = '<div' + cls + ' class="section">';
-    html += '<div class="section-title">代理：' + _escapeHtml(agent.name) + '</div>';
 
+    // --- 代理匯總（仿網頁右側面板）---
+    var sh = Shareholders.getById(agent.shareholderId);
+    var allMtxs = MemberTxs.getAll();
+    var allBookings = Bookings.getAll();
+    var quota = calcAgentQuota(agent.id, allMtxs, allBookings);
+    var pct = quota.totalThreshold > 0 ? Math.min(100, (quota.totalWashRaw / quota.totalThreshold) * 100) : 0;
+    var totalSettle = txs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
+    var totalWash = txs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
+    var memberCount = new Set(txs.map(function(t) { return t.memberId; })).size;
+    var roomCount = bookings.reduce(function(s, b) { return s + (b.nights || 1); }, 0);
+
+    // 代理 header
+    html += '<div class="agent-header">';
+    html += '<span class="agent-name">' + _escapeHtml(agent.name) + '</span>';
+    html += '<span class="agent-sh">上線: ' + _escapeHtml(sh ? sh.name : '-') + '</span>';
+    html += '</div>';
+
+    // 配額條
+    html += '<div class="quota-section">';
+    html += '<div class="quota-info">';
+    html += '<span>總洗碼: ' + quota.totalWashCode.toFixed(2) + ' 萬</span>';
+    html += '<span>總門檻: ' + (quota.totalThreshold / 10000).toFixed(0) + ' 萬</span>';
+    html += '<span class="' + (quota.isMet ? 'met' : 'unmet') + '">' + (quota.isMet ? '✅ 達標' : '⚠️ 未達標') + '</span>';
+    html += '</div>';
+    html += '<div class="quota-bar"><div class="quota-fill" style="width:' + pct + '%;"></div></div>';
+    html += '</div>';
+
+    // 會員匯總表
+    if (txs.length > 0) {
+      var memberGroups = {};
+      txs.forEach(function(tx) {
+        var mid = tx.memberId;
+        if (!memberGroups[mid]) memberGroups[mid] = { totalSettle: 0 };
+        memberGroups[mid].totalSettle += calcTotalNT(tx);
+      });
+      html += '<table class="summary-table"><thead><tr>';
+      html += '<th>客名</th><th class="num">交收</th>';
+      html += '</tr></thead><tbody>';
+      var sumSettle = 0;
+      Object.keys(memberGroups).forEach(function(mid) {
+        var g = memberGroups[mid];
+        var m = Members.getById(mid);
+        sumSettle += g.totalSettle;
+        html += '<tr>';
+        html += '<td>' + _escapeHtml(maskName(m ? m.name : mid)) + '</td>';
+        html += '<td class="num ' + (g.totalSettle < 0 ? 'negative' : 'positive') + '">' + fmtCardNum(Math.round(g.totalSettle)) + '</td>';
+        html += '</tr>';
+      });
+      html += '<tr class="total-row">';
+      html += '<td>合計</td>';
+      html += '<td class="num ' + (sumSettle < 0 ? 'negative' : 'positive') + '">' + fmtCardNum(Math.trunc(sumSettle / 100) * 100) + '</td>';
+      html += '</tr></tbody></table>';
+    }
+
+    // 統計卡片
+    html += '<div class="stats-grid">';
+    html += '<div class="stat-card"><div class="stat-label">總洗碼</div><div class="stat-val">' + fmtCardNum(totalWash) + ' 萬</div></div>';
+    html += '<div class="stat-card"><div class="stat-label">總交收</div><div class="stat-val ' + (totalSettle < 0 ? 'negative' : 'positive') + '">' + fmtCardNum(Math.trunc(totalSettle / 100) * 100) + '</div></div>';
+    html += '<div class="stat-card"><div class="stat-label">訂房數</div><div class="stat-val">' + roomCount + ' 晚</div></div>';
+    html += '<div class="stat-card"><div class="stat-label">會員數</div><div class="stat-val">' + memberCount + '</div></div>';
+    html += '</div>';
+
+    html += '<div class="section-title">會員帳卡明細</div>';
+
+    // --- 會員帳卡 ---
     if (txs.length > 0) {
       txs.forEach(function(tx) {
         html += buildTxCard(tx, defaultHallId);
       });
-      // 合計列
-      var totalSettle = txs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
-      var totalWash = txs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
       html += '<div class="summary-bar">';
       html += '總洗碼: ' + fmtCardNum(totalWash) + ' 萬 · ';
       html += '合計交收: NT$ ' + fmtNum(Math.round(totalSettle));
@@ -2669,10 +2756,6 @@ var PdfExport = (function() {
     return html;
   }
 
-  /**
-   * 開新視窗 + window.print() 方案
-   * 100% 可靠，不依賴 html2canvas
-   */
   function generatePDF(htmlContent, filename) {
     var printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -2705,7 +2788,6 @@ var PdfExport = (function() {
     return parts.join(' · ');
   }
 
-  /* === 代理 PDF：匯出該代理的會員帳卡明細+房間記錄（限指定團） === */
   function exportAgent(agentId, tripId) {
     var agent = Agents.getById(agentId);
     if (!agent) { Toast.error('找不到代理'); return; }
@@ -2757,7 +2839,6 @@ var PdfExport = (function() {
     generatePDF(html, '代理_' + agent.name + '_明細');
   }
 
-  /* === 股東 PDF：全部代理，按代理分組+分頁+小計（限指定團） === */
   function exportShareholder(tripId) {
     var agents = Agents.getAll();
     if (agents.length === 0) { Toast.error('無代理資料'); return; }
