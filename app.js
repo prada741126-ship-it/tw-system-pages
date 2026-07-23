@@ -650,7 +650,7 @@ function calcAgentQuota(agentId, memberTxs, bookings) {
     totalWashRaw: totalWashRaw,
     totalThreshold: totalThreshold,
     isMet: isMet,
-    roomCount: agentBookings.length,
+    roomCount: agentBookings.reduce(function(s, b) { return s + (b.nights || 1); }, 0),
     rooms: agentBookings,
   };
 }
@@ -663,7 +663,7 @@ function calcTripStats(trip, memberTxs, bookings) {
   var totalWash = tripTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
   var totalSettlement = tripTxs.reduce(function(s, t) { return s + (t.settlementAmount || 0); }, 0);
   var memberCount = new Set(tripTxs.map(function(t) { return t.memberId; })).size;
-  var roomCount = tripBookings.length;
+  var roomCount = tripBookings.reduce(function(s, b) { return s + (b.nights || 1); }, 0);
 
   // 按厅分组洗码
   var hallWash = {};
@@ -3600,7 +3600,7 @@ var MemberPage = (function() {
           });
           var agWash = agTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
           var agSettle = agTxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
-          var agRooms = allBookings.filter(function(b) { return b.agentId === ag.id; }).length;
+          var agRooms = allBookings.filter(function(b) { return b.agentId === ag.id; }).reduce(function(s, b) { return s + (b.nights || 1); }, 0);
           totalWash += agWash;
           totalSettle += agSettle;
           totalRooms += agRooms;
@@ -5664,7 +5664,7 @@ var AgentPage = (function() {
         // 统计
         html += '<div class="agent-stats">';
         html += '<span>會員帳務: ' + agentTxs.length + ' 筆</span>';
-        html += '<span>訂房: ' + agentBookings.length + ' 晚</span>';
+        html += '<span>訂房: ' + agentBookings.reduce(function(s, b) { return s + (b.nights || 1); }, 0) + ' 晚</span>';
         html += '<span>合計交收: NT$ ' + Math.round(totalSettle).toLocaleString() + '</span>';
         html += '</div>';
 
