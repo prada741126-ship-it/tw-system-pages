@@ -2602,7 +2602,16 @@ var PdfExport = (function() {
       margin: [10, 10, 10, 10],
       filename: filename + '.pdf',
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 1200 },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        windowWidth: 1200,
+        onclone: function(clonedDoc) {
+          var el = clonedDoc.getElementById('pdf-export-container');
+          if (el) { el.style.opacity = '1'; el.style.position = 'absolute'; }
+        }
+      },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
       pagebreak: { mode: ['css', 'legacy'], before: '.pdf-page-break' },
     };
