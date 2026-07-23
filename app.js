@@ -2413,7 +2413,7 @@ var Paginator = (function() {
 /**
  * ui/pdfExport.js — PDF 匯出模組
  * 將代理/股東的洗碼明細+房間記錄匯出為 PDF 檔
- * 依賴: html2pdf.js (CDN defer), data/*, ui/toast.js
+ * 方案：開新視窗 + window.print()，繞過 html2canvas 兼容性問題
  */
 var PdfExport = (function() {
 
@@ -2434,39 +2434,58 @@ var PdfExport = (function() {
     }
   }
 
-  function buildHeader(title, subtitle) {
+  function _escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function buildPage(title, subtitle, sectionsHtml) {
     var now = new Date();
-    var mm = String(now.getMonth() + 1);
-    if (mm.length < 2) mm = '0' + mm;
-    var dd = String(now.getDate());
-    if (dd.length < 2) dd = '0' + dd;
+    var mm = String(now.getMonth() + 1).padStart(2, '0');
+    var dd = String(now.getDate()).padStart(2, '0');
     var dateStr = now.getFullYear() + '/' + mm + '/' + dd;
 
-    var html = '';
-    html += '<div style="text-align:center;margin-bottom:20px;padding-bottom:10px;border-bottom:2px solid #333;">';
-    html += '<div style="font-size:20px;font-weight:bold;margin-bottom:4px;">博盈國際會 — 台灣版</div>';
-    html += '<div style="font-size:16px;margin-bottom:4px;">' + title + '</div>';
-    if (subtitle) html += '<div style="font-size:12px;color:#666;margin-bottom:2px;">' + subtitle + '</div>';
-    html += '<div style="font-size:11px;color:#999;">匯出日期：' + dateStr + '</div>';
-    html += '</div>';
+    var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + _escapeHtml(title) + '</title>';
+    html += '<style>';
+    html += 'body{font-family:"Microsoft JhengHei","PingFang TC",sans-serif;font-size:12px;color:#1a1a2e;margin:0;padding:20px;background:#fff;}';
+    html += 'h1{text-align:center;font-size:18px;margin:0 0 4px 0;}';
+    html += 'h2{text-align:center;font-size:14px;margin:0 0 4px 0;font-weight:normal;color:#444;}';
+    html += '.sub{text-align:center;font-size:11px;color:#888;margin-bottom:16px;}';
+    html += '.date{text-align:center;font-size:10px;color:#aaa;margin-bottom:20px;}';
+    html += '.section{margin-bottom:24px;page-break-inside:avoid;}';
+    html += '.section-title{font-size:14px;font-weight:bold;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #999;}';
+    html += 'table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px;}';
+    html += 'th,td{border:1px solid #bbb;padding:5px 8px;}';
+    html += 'th{background:#e8e8e8;text-align:center;font-weight:bold;}';
+    html += 'td.num{text-align:right;}';
+    html += 'td.center{text-align:center;}';
+    html += '.total-row{background:#f0f0f0;font-weight:bold;}';
+    html += '.empty{color:#999;font-size:12px;margin-bottom:12px;}';
+    html += '.page-break{page-break-before:always;}';
+    html += '@media print{body{padding:10px;} .no-print{display:none;}}';
+    html += '</style></head><body>';
+
+    html += '<h1>博盈國際會 — 台灣版</h1>';
+    html += '<h2>' + _escapeHtml(title) + '</h2>';
+    if (subtitle) html += '<div class="sub">' + _escapeHtml(subtitle) + '</div>';
+    html += '<div class="date">匯出日期：' + dateStr + '</div>';
+
+    html += sectionsHtml;
+    html += '</body></html>';
     return html;
   }
 
   function buildWashTable(txs, defaultHallId) {
     var halls = Settings.getVipHalls();
-    var html = '';
-    html += '<div style="margin-bottom:16px;">';
-    html += '<div style="font-size:14px;font-weight:bold;margin-bottom:6px;">洗碼明細</div>';
-    html += '<table style="width:100%;border-collapse:collapse;font-size:11px;">';
-    html += '<thead><tr style="background:#e8e8e8;">';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:left;">會員</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:center;">廳</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">出碼</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">回碼</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">洗碼量</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">退傭</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">開銷(NT)</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">交收(NT)</th>';
+    var html = '<div class="section">';
+    html += '<div style="font-size:13px;font-weight:bold;margin-bottom:6px;">洗碼明細</div>';
+    html += '<table><thead><tr>';
+    html += '<th>會員</th><th>廳</th><th class="num">出碼</th><th class="num">回碼</th>';
+    html += '<th class="num">洗碼量</th><th class="num">退傭</th><th class="num">開銷(NT)</th><th class="num">交收(NT)</th>';
     html += '</tr></thead><tbody>';
 
     var sumWash = 0, sumComm = 0, sumExp = 0, sumSettle = 0;
@@ -2485,46 +2504,32 @@ var PdfExport = (function() {
       sumSettle += settleNT;
 
       html += '<tr>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;">' + (m ? m.name : tx.memberId) + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:center;">' + hallName + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + (tx.outCode || 0) + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + (tx.backCode || 0) + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + (tx.washCode || 0) + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtDec(comm) + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtNum(tx.expensesNT || 0) + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtNum(settleNT) + '</td>';
+      html += '<td>' + _escapeHtml(m ? m.name : tx.memberId) + '</td>';
+      html += '<td class="center">' + _escapeHtml(hallName) + '</td>';
+      html += '<td class="num">' + (tx.outCode || 0) + '</td>';
+      html += '<td class="num">' + (tx.backCode || 0) + '</td>';
+      html += '<td class="num">' + (tx.washCode || 0) + '</td>';
+      html += '<td class="num">' + fmtDec(comm) + '</td>';
+      html += '<td class="num">' + fmtNum(tx.expensesNT || 0) + '</td>';
+      html += '<td class="num">' + fmtNum(settleNT) + '</td>';
       html += '</tr>';
     });
 
-    /* 小計行 */
-    html += '<tr style="background:#f0f0f0;font-weight:bold;">';
-    html += '<td style="border:1px solid #bbb;padding:4px 6px;" colspan="4">小計</td>';
-    html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtDec(sumWash) + '</td>';
-    html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtDec(sumComm) + '</td>';
-    html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtNum(sumExp) + '</td>';
-    html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtNum(sumSettle) + '</td>';
-    html += '</tr>';
-
-    html += '</tbody></table>';
-    html += '</div>';
+    html += '<tr class="total-row"><td colspan="4">小計</td>';
+    html += '<td class="num">' + fmtDec(sumWash) + '</td>';
+    html += '<td class="num">' + fmtDec(sumComm) + '</td>';
+    html += '<td class="num">' + fmtNum(sumExp) + '</td>';
+    html += '<td class="num">' + fmtNum(sumSettle) + '</td>';
+    html += '</tr></tbody></table></div>';
     return html;
   }
 
   function buildRoomTable(bookings) {
-    var html = '';
-    html += '<div style="margin-bottom:16px;">';
-    html += '<div style="font-size:14px;font-weight:bold;margin-bottom:6px;">房間記錄</div>';
-    html += '<table style="width:100%;border-collapse:collapse;font-size:11px;">';
-    html += '<thead><tr style="background:#e8e8e8;">';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:left;">客人</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;">酒店</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;">房型</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;">入住</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;">退房</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:center;">晚</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">門檻(萬)</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:right;">房費</th>';
-    html += '<th style="border:1px solid #bbb;padding:4px 6px;text-align:center;">狀態</th>';
+    var html = '<div class="section">';
+    html += '<div style="font-size:13px;font-weight:bold;margin-bottom:6px;">房間記錄</div>';
+    html += '<table><thead><tr>';
+    html += '<th>客人</th><th>酒店</th><th>房型</th><th>入住</th><th>退房</th>';
+    html += '<th class="num">晚</th><th class="num">門檻(萬)</th><th class="num">房費</th><th>狀態</th>';
     html += '</tr></thead><tbody>';
 
     var sumCharge = 0;
@@ -2534,97 +2539,64 @@ var PdfExport = (function() {
       sumCharge += charge;
 
       html += '<tr>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;">' + (b.guestName || '-') + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;">' + (b.hotel || '-') + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;">' + (b.roomType || '-') + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:center;">' + (b.checkIn || '-') + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:center;">' + (b.checkOut || '-') + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:center;">' + (b.nights || 1) + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + ((b.threshold || 0) / 10000).toFixed(0) + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + (charge > 0 ? fmtNum(charge) : '-') + '</td>';
-      html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:center;">' + feeLabel(b.feeType) + '</td>';
+      html += '<td>' + _escapeHtml(b.guestName || '-') + '</td>';
+      html += '<td>' + _escapeHtml(b.hotel || '-') + '</td>';
+      html += '<td>' + _escapeHtml(b.roomType || '-') + '</td>';
+      html += '<td class="center">' + _escapeHtml(b.checkIn || '-') + '</td>';
+      html += '<td class="center">' + _escapeHtml(b.checkOut || '-') + '</td>';
+      html += '<td class="num">' + (b.nights || 1) + '</td>';
+      html += '<td class="num">' + ((b.threshold || 0) / 10000).toFixed(0) + '</td>';
+      html += '<td class="num">' + (charge > 0 ? fmtNum(charge) : '-') + '</td>';
+      html += '<td class="center">' + feeLabel(b.feeType) + '</td>';
       html += '</tr>';
     });
 
-    /* 小計行 */
-    html += '<tr style="background:#f0f0f0;font-weight:bold;">';
-    html += '<td style="border:1px solid #bbb;padding:4px 6px;" colspan="7">小計</td>';
-    html += '<td style="border:1px solid #bbb;padding:4px 6px;text-align:right;">' + fmtNum(sumCharge) + '</td>';
-    html += '<td style="border:1px solid #bbb;padding:4px 6px;"></td>';
-    html += '</tr>';
-
-    html += '</tbody></table>';
-    html += '</div>';
+    html += '<tr class="total-row"><td colspan="7">小計</td>';
+    html += '<td class="num">' + fmtNum(sumCharge) + '</td>';
+    html += '<td></td></tr></tbody></table></div>';
     return html;
   }
 
   function buildAgentSection(agent, txs, bookings, pageBreak, defaultHallId) {
-    var cls = pageBreak ? ' class="pdf-page-break"' : '';
-    var breakStyle = pageBreak ? 'page-break-before:always;' : '';
-    var html = '';
-    html += '<div' + cls + ' style="' + breakStyle + 'margin-bottom:20px;">';
-    html += '<div style="font-size:16px;font-weight:bold;margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid #999;">代理：' + agent.name + '</div>';
+    var cls = pageBreak ? ' class="page-break"' : '';
+    var html = '<div' + cls + ' class="section">';
+    html += '<div class="section-title">代理：' + _escapeHtml(agent.name) + '</div>';
 
     if (txs.length > 0) {
       html += buildWashTable(txs, defaultHallId);
     } else {
-      html += '<div style="font-size:12px;color:#999;margin-bottom:12px;">無洗碼記錄</div>';
+      html += '<div class="empty">無洗碼記錄</div>';
     }
 
     if (bookings.length > 0) {
       html += buildRoomTable(bookings);
     } else {
-      html += '<div style="font-size:12px;color:#999;margin-bottom:12px;">無房間記錄</div>';
+      html += '<div class="empty">無房間記錄</div>';
     }
 
     html += '</div>';
     return html;
   }
 
+  /**
+   * 開新視窗 + window.print() 方案
+   * 100% 可靠，不依賴 html2canvas
+   */
   function generatePDF(htmlContent, filename) {
-    if (typeof html2pdf === 'undefined') {
-      Toast.error('PDF 庫未載入，請檢查網路連線後重試');
+    var printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      Toast.error('彈出視窗被阻擋，請允許彈出視窗後重試');
       return;
     }
 
-    /* 清理舊的匯出容器 */
-    var old = document.getElementById('pdf-export-container');
-    if (old && old.parentNode) old.parentNode.removeChild(old);
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
 
-    /* 建立離屏容器（opacity:0 讓 html2canvas 能渲染但用戶看不到） */
-    var container = document.createElement('div');
-    container.id = 'pdf-export-container';
-    container.style.cssText = 'position:absolute;left:0;top:0;width:1120px;background:#ffffff;padding:20px;opacity:0;pointer-events:none;color:#1a1a2e;line-height:1.6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft JhengHei",sans-serif;';
-    container.innerHTML = htmlContent;
-    document.body.appendChild(container);
-
-    var opt = {
-      margin: [10, 10, 10, 10],
-      filename: filename + '.pdf',
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        windowWidth: 1200,
-        onclone: function(clonedDoc) {
-          var el = clonedDoc.getElementById('pdf-export-container');
-          if (el) { el.style.opacity = '1'; el.style.position = 'absolute'; }
-        }
-      },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-      pagebreak: { mode: ['css', 'legacy'], before: '.pdf-page-break' },
-    };
-
-    Toast.info('正在生成 PDF，請稍候...');
-
-    html2pdf().set(opt).from(container).save().then(function() {
-      if (container.parentNode) container.parentNode.removeChild(container);
-      Toast.success('PDF 已下載');
-    }).catch(function() {
-      if (container.parentNode) container.parentNode.removeChild(container);
-      Toast.error('PDF 生成失敗');
-    });
+    // 等樣式載入完成後觸發列印
+    setTimeout(function() {
+      printWindow.print();
+      // 部分瀏覽器列印對話框關閉後不會自動關閉視窗，由用戶手動關閉
+    }, 300);
   }
 
   /* === 代理 PDF：只匯出該代理的洗碼明細+房間記錄（限指定團） === */
@@ -2675,10 +2647,8 @@ var PdfExport = (function() {
       if (tripObj) subtitle = (subtitle ? subtitle + ' · ' : '') + '團：' + tripObj.id;
     }
 
-    var html = '';
-    html += buildHeader('代理：' + agent.name, subtitle);
-    html += buildAgentSection(agent, mtxs, bookings, false, defaultHallId);
-
+    var sections = buildAgentSection(agent, mtxs, bookings, false, defaultHallId);
+    var html = buildPage('代理：' + agent.name, subtitle, sections);
     generatePDF(html, '代理_' + agent.name + '_明細');
   }
 
@@ -2727,9 +2697,7 @@ var PdfExport = (function() {
       if (tripObj) subtitle += ' · 團：' + tripObj.id;
     }
 
-    var html = '';
-    html += buildHeader('股東全覽 — 全部代理明細', subtitle);
-
+    var sectionsHtml = '';
     var isFirst = true;
     agents.forEach(function(agent) {
       var agentTxs = mtxs.filter(function(t) {
@@ -2749,10 +2717,11 @@ var PdfExport = (function() {
         return effectiveAgentId === agent.id;
       });
       if (agentTxs.length === 0 && agentBookings.length === 0) return;
-      html += buildAgentSection(agent, agentTxs, agentBookings, !isFirst, defaultHallId);
+      sectionsHtml += buildAgentSection(agent, agentTxs, agentBookings, !isFirst, defaultHallId);
       isFirst = false;
     });
 
+    var html = buildPage('股東全覽 — 全部代理明細', subtitle, sectionsHtml);
     generatePDF(html, '股東全覽_全部代理明細');
   }
 
