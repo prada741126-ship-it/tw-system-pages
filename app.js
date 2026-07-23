@@ -3524,25 +3524,32 @@ var MemberPage = (function() {
       html += '<div class="mb-ap-quota-bar"><div class="mb-ap-quota-fill" style="width:' + pct + '%;' + (quota.isMet ? '' : 'background:var(--warning);') + '"></div></div>';
       html += '</div>';
 
-      // 會員匯總表
+      // 會員匯總表（同一會員多筆合併顯示總交收）
       if (agentTxs.length > 0) {
-        var halls = Settings.getVipHalls();
+        var memberGroups = {};
+        agentTxs.forEach(function(tx) {
+          var mid = tx.memberId;
+          if (!memberGroups[mid]) memberGroups[mid] = { txs: [], totalSettle: 0 };
+          var settleNT = calcTotalNT(tx);
+          memberGroups[mid].txs.push(tx);
+          memberGroups[mid].totalSettle += settleNT;
+        });
+
         html += '<table class="mb-ap-table"><thead><tr>';
-        html += '<th>日期</th><th>客名</th><th class="num">交收</th>';
+        html += '<th>客名</th><th class="num">交收</th>';
         html += '</tr></thead><tbody>';
         var sumSettle = 0;
-        agentTxs.forEach(function(tx) {
-          var m = Members.getById(tx.memberId);
-          var settleNT = calcTotalNT(tx);
-          sumSettle += settleNT;
+        Object.keys(memberGroups).forEach(function(mid) {
+          var g = memberGroups[mid];
+          var m = Members.getById(mid);
+          sumSettle += g.totalSettle;
           html += '<tr>';
-          html += '<td>' + (tx.date || '') + '</td>';
-          html += '<td>' + maskName(m ? m.name : tx.memberId) + '</td>';
-          html += '<td class="num ' + (settleNT < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.round(settleNT)) + '</td>';
+          html += '<td>' + maskName(m ? m.name : mid) + '</td>';
+          html += '<td class="num ' + (g.totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.round(g.totalSettle)) + '</td>';
           html += '</tr>';
         });
         html += '<tr class="total-row">';
-        html += '<td colspan="2">合計</td>';
+        html += '<td>合計</td>';
         html += '<td class="num ' + (sumSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.trunc(sumSettle / 100) * 100) + '</td>';
         html += '</tr>';
         html += '</tbody></table>';
