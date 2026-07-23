@@ -3570,7 +3570,7 @@ var MemberPage = (function() {
       html += '<div class="mb-ap-stats">';
       html += '<div class="mb-ap-stat"><label>總洗碼</label><span>' + fmtCardNum(totalWash) + ' 萬</span></div>';
       html += '<div class="mb-ap-stat"><label>總交收</label><span class="' + (totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.trunc(totalSettle / 100) * 100) + '</span></div>';
-      html += '<div class="mb-ap-stat"><label>訂房數</label><span>' + roomCount + ' 間</span></div>';
+      html += '<div class="mb-ap-stat"><label>訂房數</label><span>' + roomCount + ' 晚</span></div>';
       html += '<div class="mb-ap-stat"><label>會員數</label><span>' + memberCount + '</span></div>';
       html += '</div>';
 
@@ -3601,7 +3601,7 @@ var MemberPage = (function() {
         html += '<div class="mb-ap-stats">';
         html += '<div class="mb-ap-stat"><label>總洗碼</label><span>' + fmtCardNum(totalWash) + ' 萬</span></div>';
         html += '<div class="mb-ap-stat"><label>總交收</label><span class="' + (totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.trunc(totalSettle / 100) * 100) + '</span></div>';
-        html += '<div class="mb-ap-stat"><label>訂房數</label><span>' + totalRooms + ' 間</span></div>';
+        html += '<div class="mb-ap-stat"><label>訂房數</label><span>' + totalRooms + ' 晚</span></div>';
         html += '<div class="mb-ap-stat"><label>會員數</label><span>' + totalMembers + '</span></div>';
         html += '</div>';
 
@@ -5655,7 +5655,7 @@ var AgentPage = (function() {
         // 统计
         html += '<div class="agent-stats">';
         html += '<span>會員帳務: ' + agentTxs.length + ' 筆</span>';
-        html += '<span>訂房: ' + agentBookings.length + ' 間</span>';
+        html += '<span>訂房: ' + agentBookings.length + ' 晚</span>';
         html += '<span>合計交收: NT$ ' + Math.round(totalSettle).toLocaleString() + '</span>';
         html += '</div>';
 
