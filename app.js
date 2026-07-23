@@ -5998,6 +5998,7 @@ var ShareholderPage = (function() {
 
     // 計算各廳洗碼（全量，含 monthlyOnly）+ 分離標準/monthlyOnly
     var totalWash = 0;
+    var totalStandardWash = 0;     // 不含 monthlyOnly，供貢獻度計算用
     var hallWash = {};             // 全量（含 monthlyOnly）
     var standardHallWash = {};     // 標準交易
     var monthlyOnlyHallWash = {};  // monthlyOnly 交易
@@ -6011,6 +6012,7 @@ var ShareholderPage = (function() {
       var hallId = getHallId(tx);
       var wash = tx.washCode || 0;
       totalWash += wash;
+      if (!isMonthlyOnlyTx(tx)) totalStandardWash += wash;
       if (hallWash[hallId] !== undefined) hallWash[hallId] += wash;
 
       if (isMonthlyOnlyTx(tx)) {
@@ -6170,7 +6172,7 @@ var ShareholderPage = (function() {
       var contribData = [];
       shareholders.forEach(function(sh, idx) {
         var profitData = calcShareholderProfit(sh, monthTxs, settings, _currentMonth);
-        var totalData = calcShareholderTotal(profitData, shareholders, totalWash, grandTotal, totalExtra, totalMonthlyOnlyRebate);
+        var totalData = calcShareholderTotal(profitData, shareholders, totalStandardWash, grandTotal, totalExtra, totalMonthlyOnlyRebate);
         var extraShare = totalExtra * (sh.shares / totalShares);
         sumHK += totalData.totalPayableHK;
         sumTW += totalData.totalPayableTW;
@@ -6226,7 +6228,7 @@ var ShareholderPage = (function() {
       // 有特殊代理時顯示口徑說明
       if (totalMonthlyOnlyWash > 0) {
         html += '<p style="font-size:var(--font-size-sm);color:var(--text-secondary);margin-top:6px;">';
-        html += '※ 特殊代理洗碼 ' + fmtWan(totalMonthlyOnlyWash) + ' 萬計入總洗碼但不含個人貢獻，貢獻度合計 ' + totalContribPct + '% < 100%';
+        html += '※ 特殊代理洗碼 ' + fmtWan(totalMonthlyOnlyWash) + ' 萬計入總洗碼顯示，但不計入個人貢獻度與貢獻度分母';
         html += '<br>※ 特殊代理月退 ' + fmtHK(totalMonthlyOnlyRebate) + ' 不參與50/50拆分，100%按持股均分（特殊月退欄位）';
         html += '</p>';
       }
