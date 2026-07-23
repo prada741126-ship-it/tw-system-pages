@@ -1205,9 +1205,10 @@ var Uploader = {
  */
 
 var _watchers = [];
-var _isSyncing = false;
-
 var _initialized = false;
+
+// 每個 watcher 獨立 syncing flag，避免共用旗標導致 MEMBER_TXS 被其他 watcher 阻塞
+// → Bot 寫入後 Web 端無法即時顯示的根因
 
 function initWatchers() {
   if (_initialized) return;
@@ -1235,15 +1236,16 @@ function _setupWatchers() {
 
   watchList.forEach(function(w) {
     var path = FB_PATH[w.key];
+    var _syncing = false;  // 每個 watcher 獨立旗標，不互相阻塞
     var off = fbOn(path, function(remoteVal) {
-      if (_isSyncing) return;
-      _isSyncing = true;
+      if (_syncing) return;
+      _syncing = true;
       try {
         var local = Store.readArray(w.storeKey);
         var remote = remoteVal ? Object.values(remoteVal) : [];
         var merged = mergeArray(local, remote);
 
-        /* MEMBER_TXS: Bot 只寫入 outCode/backCode/washCode，需重新計算衍生欄位 */
+        /* MEMBER_TXS: Bot 只寫入 outCode/backCode/washCode��需重新計算衍生欄位 */
         if (w.key === 'MEMBER_TXS' && typeof calcMemberTx === 'function') {
           var recalcCount = 0;
           merged = merged.map(function(tx) {
@@ -1273,16 +1275,17 @@ function _setupWatchers() {
       } catch(e) {
         console.error('[Watchers] ' + w.key, e);
       }
-      _isSyncing = false;
+      _syncing = false;
     });
     _watchers.push(off);
   });
 
   /* EMPLOYEE_LIST 特殊處理（物件非陣列） */
   (function() {
+    var _elSyncing = false;
     var off = fbOn(FB_PATH.EMPLOYEE_LIST, function(remoteVal) {
-      if (_isSyncing) return;
-      _isSyncing = true;
+      if (_elSyncing) return;
+      _elSyncing = true;
       try {
         var local = Store.read(STORAGE_KEYS.EMPLOYEE_LIST) || {};
         var remote = remoteVal || {};
@@ -1296,15 +1299,72 @@ function _setupWatchers() {
       } catch(e) {
         console.error('[Watchers] EMPLOYEE_LIST', e);
       }
-      _isSyncing = false;
+      _elSyncing = false;
     });
     _watchers.push(off);
   })();
 
-  // 连接状态
+  // 连接状态追蹤 + 斷線重連自動全量同步
+  var _wasConnected = undefined;
   fbOn(FB_PATH.CONNECTED, function(val) {
-    State.set('connected', !!val);
-    EventBus.emit(EVENTS.CONNECTION_CHANGED, !!val);
+    var isConnected = !!val;
+    State.set('connected', isConnected);
+    EventBus.emit(EVENTS.CONNECTION_CHANGED, isConnected);
+
+    // 從斷線恢復時，觸發全量同步確保與遠端一致
+    if (isConnected && _wasConnected === false) {
+      console.log('[Watchers] Connection restored, triggering full re-sync...');
+      _resyncAll();
+    }
+    _wasConnected = isConnected;
+  });
+}
+
+// 斷線重連時，手動從 Firebase 拉取最新數據合併到本地
+function _resyncAll() {
+  var syncPaths = [
+    FB_PATH.MEMBERS, FB_PATH.AGENTS, FB_PATH.SHAREHOLDERS,
+    FB_PATH.TRIPS, FB_PATH.MEMBER_TXS, FB_PATH.BOOKINGS,
+    FB_PATH.SUPPLEMENTS, FB_PATH.SETTINGS, FB_PATH.EXTRA_INCOME,
+    FB_PATH.HOTEL_CONFIG,
+  ];
+  var storeMap = {
+    'taiwan_data/members':       { storeKey: STORAGE_KEYS.MEMBERS,       event: EVENTS.MEMBERS_LOADED },
+    'taiwan_data/agents':        { storeKey: STORAGE_KEYS.AGENTS,        event: EVENTS.AGENTS_LOADED },
+    'taiwan_data/shareholders':  { storeKey: STORAGE_KEYS.SHAREHOLDERS,  event: EVENTS.SHAREHOLDERS_LOADED },
+    'taiwan_data/trips':         { storeKey: STORAGE_KEYS.TRIPS,         event: EVENTS.TRIPS_LOADED },
+    'taiwan_data/memberTxs':     { storeKey: STORAGE_KEYS.MEMBER_TXS,    event: EVENTS.MTX_LOADED },
+    'taiwan_data/bookings':      { storeKey: STORAGE_KEYS.BOOKINGS,      event: EVENTS.BOOKINGS_LOADED },
+    'taiwan_data/supplements':   { storeKey: STORAGE_KEYS.SUPPLEMENTS,   event: EVENTS.SYNC_COMPLETE },
+    'taiwan_data/settings':      { storeKey: STORAGE_KEYS.SETTINGS,      event: EVENTS.SETTINGS_LOADED },
+    'taiwan_data/extraIncome':   { storeKey: STORAGE_KEYS.EXTRA_INCOME,  event: EVENTS.SYNC_COMPLETE },
+    'taiwan_data/hotelConfig':   { storeKey: STORAGE_KEYS.HOTEL_CONFIG,  event: EVENTS.HOTEL_CONFIG_LOADED },
+  };
+
+  syncPaths.forEach(function(path) {
+    var cfg = storeMap[path];
+    if (!cfg) return;
+    fbOnce(path).then(function(remoteVal) {
+      var local = Store.readArray(cfg.storeKey);
+      var remote = remoteVal ? Object.values(remoteVal) : [];
+      if (remote.length === 0) return; // 無遠端數據，不覆蓋
+      var merged = mergeArray(local, remote);
+
+      // MEMBER_TXS 需要重新計算衍生欄位
+      if (cfg.event === EVENTS.MTX_LOADED && typeof calcMemberTx === 'function') {
+        merged = merged.map(function(tx) {
+          if (!tx || tx._deleted) return tx;
+          if (tx.outCode === undefined && tx.backCode === undefined && tx.washCode === undefined) return tx;
+          return Object.assign({}, tx, calcMemberTx(tx));
+        });
+      }
+
+      Store.writeArray(cfg.storeKey, merged);
+      State.set(cfg.storeKey.split('_').slice(1).join('').toLowerCase(), merged);
+      EventBus.emit(cfg.event, merged);
+    }).catch(function(e) {
+      console.error('[Watchers] _resyncAll failed for ' + path, e);
+    });
   });
 }
 
