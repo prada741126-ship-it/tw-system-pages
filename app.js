@@ -3684,7 +3684,7 @@ var MemberPage = (function() {
       html += '<span>總門檻: ' + (quota.totalThreshold / 10000).toFixed(0) + ' 萬</span>';
       html += '<span class="' + (quota.isMet ? 'text-success' : 'text-warning') + '">' + (quota.isMet ? '✅ 達標' : '⚠️ 未達標') + '</span>';
       html += '</div>';
-      html += '<div class="mb-ap-quota-bar"><div class="mb-ap-quota-fill" style="width:' + pct + '%;' + (quota.isMet ? '' : 'background:var(--warning);') + '"></div></div>';
+      html += '<div style="display:flex;align-items:center;"><div class="mb-ap-quota-bar" style="flex:1;"><div class="mb-ap-quota-fill" style="width:' + pct + '%;' + (quota.isMet ? '' : 'background:var(--warning);background:linear-gradient(90deg,var(--warning),var(--warning));') + '"></div></div><span class="mb-ap-quota-pct">' + pct.toFixed(1) + '%</span></div>';
       html += '</div>';
 
       // 會員匯總表（同一會員多筆合併顯示總交收）
