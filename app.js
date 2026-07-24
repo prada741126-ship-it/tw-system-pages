@@ -5812,7 +5812,7 @@ var AgentPage = (function() {
         html += '<span>總門檻: ' + (quota.totalThreshold / 10000).toFixed(0) + ' 萬</span>';
         html += '<span class="' + (quota.isMet ? 'text-success' : 'text-warning') + '">' + (quota.isMet ? '✅ 達標' : '⚠️ 未達標') + '</span>';
         html += '</div>';
-        html += '<div class="quota-bar"><div class="quota-fill" style="width:' + pct + '%;' + (quota.isMet ? '' : 'background:var(--warning);') + '"></div></div>';
+        html += '<div style="display:flex;align-items:center;"><div class="quota-bar" style="flex:1;"><div class="quota-fill" style="width:' + pct + '%;' + (quota.isMet ? '' : 'background:var(--warning);') + '"></div></div><span class="quota-pct">' + pct.toFixed(1) + '%</span></div>';
         html += '</div>';
 
         // 统计
