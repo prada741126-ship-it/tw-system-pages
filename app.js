@@ -2792,37 +2792,26 @@ var PdfExport = (function() {
     var agent = Agents.getById(agentId);
     if (!agent) { Toast.error('找不到代理'); return; }
 
-    var mtxs, bookings, defaultHallId = '';
-    var tripObj = null;
-    if (tripId) {
-      tripObj = Trips.getById(tripId);
-      mtxs = MemberTxs.getByTrip(tripId).filter(function(t) {
-        var effectiveAgentId = t.agentId || (tripObj ? tripObj.agentId : '');
-        return effectiveAgentId === agentId;
-      });
-      bookings = Bookings.getByTrip(tripId).filter(function(b) {
-        var effectiveAgentId = b.agentId || (tripObj ? tripObj.agentId : '');
-        return effectiveAgentId === agentId;
-      });
-      if (tripObj && tripObj.hallIds && tripObj.hallIds[0]) defaultHallId = tripObj.hallIds[0];
-    } else {
-      mtxs = MemberTxs.getAll().filter(function(t) {
-        var effectiveAgentId = t.agentId;
-        if (!effectiveAgentId && t.tripId) {
-          var tr = Trips.getById(t.tripId);
-          effectiveAgentId = tr ? (tr.agentId || '') : '';
-        }
-        return effectiveAgentId === agentId;
-      });
-      bookings = Bookings.getAll().filter(function(b) {
-        var effectiveAgentId = b.agentId;
-        if (!effectiveAgentId && b.tripId) {
-          var tr = Trips.getById(b.tripId);
-          effectiveAgentId = tr ? (tr.agentId || '') : '';
-        }
-        return effectiveAgentId === agentId;
-      });
-    }
+    var tripObj = tripId ? Trips.getById(tripId) : null;
+    var defaultHallId = (tripObj && tripObj.hallIds && tripObj.hallIds[0]) ? tripObj.hallIds[0] : '';
+
+    // 匯出代理的全部資料（跨所有團），與 Web 右側代理面板統計口徑一致
+    var mtxs = MemberTxs.getAll().filter(function(t) {
+      var effectiveAgentId = t.agentId;
+      if (!effectiveAgentId && t.tripId) {
+        var tr = Trips.getById(t.tripId);
+        effectiveAgentId = tr ? (tr.agentId || '') : '';
+      }
+      return effectiveAgentId === agentId;
+    });
+    var bookings = Bookings.getAll().filter(function(b) {
+      var effectiveAgentId = b.agentId;
+      if (!effectiveAgentId && b.tripId) {
+        var tr = Trips.getById(b.tripId);
+        effectiveAgentId = tr ? (tr.agentId || '') : '';
+      }
+      return effectiveAgentId === agentId;
+    });
 
     if (mtxs.length === 0 && bookings.length === 0) {
       Toast.warning('此代理無洗碼及房間記錄');
