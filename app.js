@@ -3358,8 +3358,25 @@ var PendingPage = (function() {
   function buildTripCard(trip) {
     var sh = Shareholders.getById(trip.shareholderId);
     var mtxs = MemberTxs.getByTrip(trip.id);
-    var bookings = Bookings.getByTrip(trip.id);
     var supplements = Supplements.getByTrip(trip.id);
+
+    // 訂房查詢：與代理面板(calcAgentQuota)口徑一致，按代理匹配而非僅靠 tripId
+    // 原因：Bot 建立訂房時可能選「不選團」導致 tripId 為空，getByTrip 會漏算
+    var allBookings = Bookings.getAll();
+    var tripAgentIds = {};
+    mtxs.forEach(function(tx) {
+      var aid = tx.agentId || (trip.agentId || '');
+      if (aid) tripAgentIds[aid] = true;
+    });
+    if (trip.agentId) tripAgentIds[trip.agentId] = true;
+    var bookings = allBookings.filter(function(b) {
+      var bAgentId = b.agentId;
+      if (!bAgentId && b.tripId && typeof Trips !== 'undefined') {
+        var tr = Trips.getById(b.tripId);
+        bAgentId = tr ? (tr.agentId || '') : '';
+      }
+      return bAgentId && tripAgentIds[bAgentId];
+    });
 
     var totalWash = mtxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
     var totalSettle = mtxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
