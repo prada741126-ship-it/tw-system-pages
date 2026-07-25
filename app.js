@@ -7213,146 +7213,344 @@ var MembersMgmtPage = (function() {
 
 // === src/pages/history.js ===
 /**
- * pages/history.js — 历史查询页
- * 按月分组 + 详细Modal(HK/NT双币)
+ * pages/history.js — 歷史查詢頁
+ * 已封存團的歸檔查詢（折疊卡片設計）
+ * 一級折疊：月份分組
+ * 二級折疊：每個團一張卡片
+ * 點擊客名 → Modal 彈出完整會員明細
  */
 var HistoryPage = (function() {
+  var _expandedTrips = {}; // 記錄哪些團已展開
+  var _expandedMonths = {}; // 記錄哪些月份已展開
+
+  // ===== 工具函數（與 pending.js 一致） =====
+  function fmtCardNum(n) {
+    var v = Math.round(n * 1000) / 1000;
+    if (Math.abs(v - Math.round(v)) < 1e-6) return Math.round(v).toLocaleString();
+    return v.toFixed(3).replace(/\.?0+$/, '');
+  }
+  function fmtNT(n) {
+    return fmtCardNum((n || 0) * 10000);
+  }
+  function calcTotalNT(tx) {
+    return (tx.subtotal || 0) * 10000 - (tx.expensesNT || 0);
+  }
+  function maskName(name) {
+    if (!name) return '';
+    if (name.length <= 2) return name[0] + '*';
+    return name[0] + '*'.repeat(name.length - 2) + name[name.length - 1];
+  }
+  function getHallName(tx, trip) {
+    var hallId = tx.vipHallId || (trip && trip.hallIds && trip.hallIds[0]) || '';
+    var hall = VIP_HALLS.find(function(h) { return h.id === hallId; });
+    return hall ? hall.name : hallId;
+  }
+
   function render() {
     var sealedTrips = Trips.getAll().filter(function(t) { return t.status === TRIP_STATUS.SEALED; });
-    var html = '';
-
-    html += '<div class="card">';
-    html += '<div class="card-header"><h3>歷史查詢</h3></div>';
+    var html = '<div class="card">';
+    html += '<div class="card-header"><h3>歷史查詢（已封存團）</h3></div>';
 
     if (sealedTrips.length === 0) {
       html += '<div class="empty-state">無封存的團</div>';
-    } else {
-      // 按月分组
-      var byMonth = {};
-      sealedTrips.forEach(function(trip) {
-        var month = trip.sealedMonth || (trip.endDate || '').substring(0, 7);
-        if (!byMonth[month]) byMonth[month] = [];
-        byMonth[month].push(trip);
-      });
-
-      Object.keys(byMonth).sort().reverse().forEach(function(month) {
-        var trips = byMonth[month];
-        var monthWash = 0;
-        var monthSettle = 0;
-        trips.forEach(function(trip) {
-          var mtxs = MemberTxs.getByTrip(trip.id);
-          monthWash += mtxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
-          monthSettle += mtxs.reduce(function(s, t) { return s + (t.settlementAmount || 0); }, 0);
-        });
-
-        html += '<div class="month-group">';
-        html += '<div class="month-header" onclick="HistoryPage.toggleMonth(this)">';
-        html += '<span class="month-title">' + month + '</span>';
-        html += '<span class="month-stats">' + trips.length + ' 團 | 洗碼 ' + monthWash.toFixed(2) + ' 萬 | 交收 NT$ ' + Math.round(monthSettle).toLocaleString() + '</span>';
-        html += '<span class="toggle-icon">▼</span></div>';
-
-        html += '<div class="month-content" style="display:none;">';
-        html += '<table class="data-table"><thead><tr>';
-        html += '<th>團ID</th><th>股東</th><th>成員</th><th>洗碼(萬)</th><th>交收(NT)</th><th>封存日</th><th>操作</th>';
-        html += '</tr></thead><tbody>';
-        trips.forEach(function(trip) {
-          var sh = Shareholders.getById(trip.shareholderId);
-          var mtxs = MemberTxs.getByTrip(trip.id);
-          var wash = mtxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
-          var settle = mtxs.reduce(function(s, t) { return s + (t.settlementAmount || 0); }, 0);
-          html += '<tr>';
-          html += '<td>' + trip.id + '</td>';
-          html += '<td>' + (sh ? sh.name : '') + '</td>';
-          html += '<td>' + (trip.memberIds || []).length + '人</td>';
-          html += '<td>' + wash.toFixed(2) + '</td>';
-          html += '<td>' + Math.round(settle).toLocaleString() + '</td>';
-          html += '<td>' + (trip.sealedAt ? new Date(trip.sealedAt).toISOString().slice(0, 10) : '') + '</td>';
-          html += '<td><button class="btn-sm" onclick="HistoryPage.showDetail(\'' + trip.id + '\')">詳情</button></td>';
-          html += '</tr>';
-        });
-        html += '</tbody></table></div></div>';
-      });
+      html += '</div>';
+      var container = document.getElementById('page-history');
+      if (container) container.innerHTML = html;
+      return;
     }
 
+    // 按月分組
+    var byMonth = {};
+    sealedTrips.forEach(function(trip) {
+      var month = trip.sealedMonth || (trip.endDate || '').substring(0, 7) || '未分類';
+      if (!byMonth[month]) byMonth[month] = [];
+      byMonth[month].push(trip);
+    });
+
+    var sortedMonths = Object.keys(byMonth).sort().reverse();
+    sortedMonths.forEach(function(month) {
+      var trips = byMonth[month];
+      var monthWash = 0;
+      var monthSettle = 0;
+      var monthBookings = 0;
+      var monthMemberCnt = 0;
+      trips.forEach(function(trip) {
+        var mtxs = MemberTxs.getByTrip(trip.id);
+        var bks = getTripBookings(trip);
+        monthWash += mtxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
+        monthSettle += mtxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
+        monthBookings += bks.reduce(function(s, b) { return s + (b.nights || 1); }, 0);
+        var uniqueMembers = {};
+        mtxs.forEach(function(t) { uniqueMembers[t.memberId] = true; });
+        monthMemberCnt += Object.keys(uniqueMembers).length;
+      });
+
+      var isMonthOpen = _expandedMonths[month];
+
+      // 一級折疊：月份分組
+      html += '<div class="ht-month-group st-collapsible' + (isMonthOpen ? '' : ' st-collapsed') + '">';
+      html += '<div class="ht-month-header st-collapsible-header" onclick="HistoryPage.toggleMonth(\'' + month + '\')">';
+      html += '<span class="ht-month-icon">📅</span>';
+      html += '<span class="ht-month-title">' + month + '</span>';
+      html += '<span class="ht-month-stats">';
+      html += trips.length + ' 團 · 會員 ' + monthMemberCnt + ' · 訂房 ' + monthBookings + ' 晚';
+      html += ' · 洗碼 ' + fmtCardNum(monthWash) + ' 萬';
+      html += ' · 交收 <span class="' + (monthSettle < 0 ? 'num-negative' : 'num-positive') + '">NT$ ' + fmtCardNum(Math.round(monthSettle)) + '</span>';
+      html += '</span>';
+      html += '<span class="st-toggle-icon">▼</span>';
+      html += '</div>';
+
+      // 二級折疊：每月內的團
+      html += '<div class="ht-month-content st-collapsible-body">';
+
+      // 月份內的團按時間倒序
+      trips.sort(function(a, b) {
+        return (b.sealedAt || b.endDate || '').localeCompare(a.sealedAt || a.endDate || '');
+      });
+
+      trips.forEach(function(trip) {
+        html += buildTripCard(trip);
+      });
+
+      html += '</div>'; // ht-month-content
+      html += '</div>'; // ht-month-group
+    });
+
     html += '</div>';
+
     var container = document.getElementById('page-history');
     if (container) container.innerHTML = html;
   }
 
-  function toggleMonth(headerEl) {
-    var content = headerEl.nextElementSibling;
-    if (content) {
-      content.style.display = content.style.display === 'none' ? '' : 'none';
-      var icon = headerEl.querySelector('.toggle-icon');
-      if (icon) icon.textContent = content.style.display === 'none' ? '▼' : '▲';
-    }
+  // 統一的訂房查詢（與 pending.js 一致，按代理匹配）
+  function getTripBookings(trip) {
+    var mtxs = MemberTxs.getByTrip(trip.id);
+    var allBookings = Bookings.getAll();
+    var tripAgentIds = {};
+    mtxs.forEach(function(tx) {
+      var aid = tx.agentId || (trip.agentId || '');
+      if (aid) tripAgentIds[aid] = true;
+    });
+    if (trip.agentId) tripAgentIds[trip.agentId] = true;
+    return allBookings.filter(function(b) {
+      var bAgentId = b.agentId;
+      if (!bAgentId && b.tripId && typeof Trips !== 'undefined') {
+        var tr = Trips.getById(b.tripId);
+        bAgentId = tr ? (tr.agentId || '') : '';
+      }
+      return bAgentId && tripAgentIds[bAgentId];
+    });
   }
 
-  function showDetail(tripId) {
-    var trip = Trips.getById(tripId);
-    if (!trip) return;
-    var mtxs = MemberTxs.getByTrip(tripId);
-    var bookings = Bookings.getByTrip(tripId);
-    var supplements = Supplements.getByTrip(tripId);
+  function buildTripCard(trip) {
     var sh = Shareholders.getById(trip.shareholderId);
+    var mtxs = MemberTxs.getByTrip(trip.id);
+    var supplements = Supplements.getByTrip(trip.id);
+    var bookings = getTripBookings(trip);
 
-    var html = '';
-    html += '<div class="detail-section"><h4>團資訊</h4>';
-    html += '<p>團ID: ' + trip.id + ' | 股東: ' + (sh ? sh.name : '') + ' | 封存月份: ' + (trip.sealedMonth || '') + '</p></div>';
+    var totalWash = mtxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
+    var totalSettle = mtxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
+    var roomNights = bookings.reduce(function(s, b) { return s + (b.nights || 1); }, 0);
+    var memberCount = Object.keys(mtxs.reduce(function(acc, tx) { acc[tx.memberId] = true; return acc; }, {})).length;
+    var sealedDate = trip.sealedAt ? new Date(trip.sealedAt).toISOString().slice(0, 10) : (trip.endDate || '-');
 
-    html += '<div class="detail-section"><h4>會員帳務 (HK/NT 雙幣)</h4>';
-    if (mtxs.length === 0) {
-      html += '<p>無帳務記錄</p>';
-    } else {
-      html += '<table class="data-table compact"><thead><tr>';
-      html += '<th>會員</th><th>廳</th><th>出碼</th><th>回碼</th><th>洗碼</th>';
-      html += '<th>HK交收</th><th>NT交收</th>';
-      html += '</tr></thead><tbody>';
-      mtxs.forEach(function(tx) {
-        var m = Members.getById(tx.memberId);
-        html += '<tr>';
-        html += '<td>' + (m ? m.name : tx.memberId) + '</td>';
-        html += '<td>' + (tx.vipHallId || '') + '</td>';
-        html += '<td>' + (tx.outCode || 0) + '</td>';
-        html += '<td>' + (tx.backCode || 0) + '</td>';
-        html += '<td>' + (tx.washCode || 0) + '</td>';
-        html += '<td>HK$ ' + ((tx.subtotal || 0) * 10000).toFixed(0) + '</td>';
-        html += '<td>NT$ ' + Math.round(tx.settlementAmount || 0).toLocaleString() + '</td>';
-        html += '</tr>';
-      });
-      html += '</tbody></table>';
-    }
+    var isExpanded = _expandedTrips[trip.id];
+
+    var html = '<div class="pd-card ht-trip-card st-collapsible' + (isExpanded ? '' : ' st-collapsed') + '" data-trip="' + trip.id + '">';
+
+    // 卡片頭部（可點擊折疊）
+    html += '<div class="pd-card-header st-collapsible-header" onclick="HistoryPage.toggleCard(\'' + trip.id + '\')">';
+    html += '<div class="pd-card-title">';
+    html += '<span class="pd-trip-id">' + trip.id + '</span>';
+    html += '<span class="pd-trip-sh">' + (sh ? sh.name : '') + '</span>';
+    html += '<span class="pd-trip-date">封存日: ' + sealedDate + '</span>';
+    html += '</div>';
+    html += '<div class="pd-card-stats">';
+    html += '<span>會員 ' + mtxs.length + ' 筆</span>';
+    html += '<span>洗碼 ' + fmtCardNum(totalWash) + ' 萬</span>';
+    html += '<span class="' + (totalSettle < 0 ? 'num-negative' : 'num-positive') + '">交收 NT$ ' + fmtCardNum(Math.round(totalSettle)) + '</span>';
+    html += '<span>訂房 ' + roomNights + ' 晚</span>';
+    html += '</div>';
+    html += '<span class="st-toggle-icon">▼</span>';
     html += '</div>';
 
-    if (bookings.length > 0) {
-      html += '<div class="detail-section"><h4>訂房</h4>';
-      html += '<table class="data-table compact"><thead><tr>';
-      html += '<th>客人</th><th>酒店</th><th>房型</th><th>入住</th><th>退房</th>';
-      html += '</tr></thead><tbody>';
-      bookings.forEach(function(b) {
-        html += '<tr><td>' + b.guestName + '</td><td>' + b.hotel + '</td><td>' + b.roomType + '</td>';
-        html += '<td>' + b.checkIn + '</td><td>' + b.checkOut + '</td></tr>';
+    // 折疊內容
+    html += '<div class="pd-card-body st-collapsible-body">';
+
+    // 會員匯總表（客名/廳別/交收，同代理面板風格）
+    if (mtxs.length > 0) {
+      var memberGroups = {};
+      mtxs.forEach(function(tx) {
+        var mid = tx.memberId;
+        if (!memberGroups[mid]) memberGroups[mid] = { txs: [], totalSettle: 0, hallName: '' };
+        var settleNT = calcTotalNT(tx);
+        memberGroups[mid].txs.push(tx);
+        memberGroups[mid].totalSettle += settleNT;
+        if (!memberGroups[mid].hallName) {
+          memberGroups[mid].hallName = getHallName(tx, trip);
+        }
       });
-      html += '</tbody></table></div>';
+
+      html += '<table class="mb-ap-table pd-member-table"><thead><tr>';
+      html += '<th>客名</th><th>廳別</th><th class="num">交收</th>';
+      html += '</tr></thead><tbody>';
+      var sumSettle = 0;
+      Object.keys(memberGroups).forEach(function(mid) {
+        var g = memberGroups[mid];
+        var m = Members.getById(mid);
+        sumSettle += g.totalSettle;
+        html += '<tr>';
+        html += '<td><a href="javascript:void(0)" onclick="HistoryPage.showMemberDetail(\'' + trip.id + '\',\'' + mid + '\')" class="pd-member-link">' + maskName(m ? m.name : mid) + '</a></td>';
+        html += '<td>' + g.hallName + '</td>';
+        html += '<td class="num ' + (g.totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.round(g.totalSettle)) + '</td>';
+        html += '</tr>';
+      });
+      html += '<tr class="total-row">';
+      html += '<td>合計</td>';
+      html += '<td></td>';
+      html += '<td class="num ' + (sumSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.trunc(sumSettle / 100) * 100) + '</td>';
+      html += '</tr>';
+      html += '</tbody></table>';
+    } else {
+      html += '<div class="empty-state">此團無帳務記錄</div>';
     }
 
-    if (supplements.length > 0) {
-      html += '<div class="detail-section"><h4>補帳</h4>';
-      html += '<table class="data-table compact"><thead><tr>';
-      html += '<th>描述</th><th>HK</th><th>NT</th><th>狀態</th>';
-      html += '</tr></thead><tbody>';
-      supplements.forEach(function(s) {
-        html += '<tr><td>' + s.description + '</td><td>HK$ ' + s.amountHK + '</td>';
-        html += '<td>NT$ ' + Math.round(s.settlementAmount || 0).toLocaleString() + '</td>';
-        html += '<td>' + s.status + '</td></tr>';
-      });
-      html += '</tbody></table></div>';
-    }
+    // 底部 KPI
+    html += '<div class="pd-card-footer">';
+    html += '<div class="mb-ap-stats pd-stats">';
+    html += '<div class="mb-ap-stat"><label>總洗碼</label><span>' + fmtCardNum(totalWash) + ' 萬</span></div>';
+    html += '<div class="mb-ap-stat"><label>總交收</label><span class="' + (totalSettle < 0 ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(Math.trunc(totalSettle / 100) * 100) + '</span></div>';
+    html += '<div class="mb-ap-stat"><label>訂房數</label><span>' + roomNights + ' 晚</span></div>';
+    html += '<div class="mb-ap-stat"><label>會員數</label><span>' + memberCount + '</span></div>';
+    html += '</div>';
+    html += '<span class="ht-sealed-badge">已封存</span>';
+    html += '</div>';
 
-    Modal.open('團詳情 - ' + tripId, html);
+    html += '</div>'; // pd-card-body
+    html += '</div>'; // pd-card
+    return html;
   }
 
-  return { render: render, toggleMonth: toggleMonth, showDetail: showDetail };
+  function toggleMonth(month) {
+    _expandedMonths[month] = !_expandedMonths[month];
+    var groups = document.querySelectorAll('.ht-month-group');
+    groups.forEach(function(g) {
+      var title = g.querySelector('.ht-month-title');
+      if (title && title.textContent === month) {
+        if (_expandedMonths[month]) {
+          g.classList.remove('st-collapsed');
+        } else {
+          g.classList.add('st-collapsed');
+        }
+      }
+    });
+  }
+
+  function toggleCard(tripId) {
+    _expandedTrips[tripId] = !_expandedTrips[tripId];
+    var card = document.querySelector('.ht-trip-card[data-trip="' + tripId + '"]');
+    if (card) {
+      if (_expandedTrips[tripId]) {
+        card.classList.remove('st-collapsed');
+      } else {
+        card.classList.add('st-collapsed');
+      }
+    }
+  }
+
+  function showMemberDetail(tripId, memberId) {
+    var trip = Trips.getById(tripId);
+    var mtxs = MemberTxs.getByTrip(tripId).filter(function(t) { return t.memberId === memberId; });
+    var m = Members.getById(memberId);
+
+    var html = '';
+    html += '<div class="pd-detail-modal">';
+
+    // 會員標頭
+    html += '<div class="pd-detail-header">';
+    html += '<span class="pd-detail-name">' + (m ? m.id + ' ' + m.name : memberId) + '</span>';
+    html += '<span class="pd-detail-sh">團: ' + tripId + '</span>';
+    html += '</div>';
+
+    // 逐筆帳務（同會員帳卡風格）
+    mtxs.forEach(function(tx, idx) {
+      var hallName = getHallName(tx, trip);
+      var totalNT = calcTotalNT(tx);
+      var isNeg = (tx.upDown || 0) < 0;
+
+      html += '<div class="mb-card pd-detail-card">';
+
+      // 標頭：廳名 + 日期 + 筆數
+      html += '<div class="mb-card-header">';
+      html += '<div class="mb-card-hall">' + hallName + (tx.date ? ' · ' + tx.date : '') + '</div>';
+      html += '<div class="mb-card-member">#' + (idx + 1) + '</div>';
+      html += '</div>';
+
+      // 第一區：出碼、回碼、上下分
+      html += '<div class="mb-card-section">';
+      html += '<div class="mb-card-row"><span class="mb-card-label">出碼</span><span class="mb-card-val">' + fmtCardNum(tx.outCode || 0) + ' HK萬</span></div>';
+      html += '<div class="mb-card-row"><span class="mb-card-label">回碼</span><span class="mb-card-val">' + fmtCardNum(tx.backCode || 0) + ' HK萬</span></div>';
+      html += '<div class="mb-card-row"><span class="mb-card-label">上下分</span><span class="mb-card-val ' + (isNeg ? 'num-negative' : 'num-positive') + '">' + fmtCardNum(tx.upDown || 0) + ' HK萬</span></div>';
+      html += '</div>';
+
+      // 第二區：洗碼、倍率、返水、退傭、NT輸贏、小計
+      html += '<div class="mb-card-section">';
+      html += '<div class="mb-card-row"><span class="mb-card-label">洗碼數</span><span class="mb-card-val">' + fmtCardNum(tx.washCode || 0) + ' HK萬</span></div>';
+      html += '<div class="mb-card-row"><span class="mb-card-label">倍率</span><span class="mb-card-val">' + (tx.rate1 || 0) + ' / ' + (tx.rate2 || 0) + '</span></div>';
+      html += '<div class="mb-card-row"><span class="mb-card-label">返水</span><span class="mb-card-val">' + (tx.rebate1 || 0) + ' / ' + (tx.rebate2 || 0) + '</span></div>';
+      html += '<div class="mb-card-row"><span class="mb-card-label">退傭1</span><span class="mb-card-val">' + Math.trunc((tx.commission1 || 0) * 10000).toLocaleString() + '</span></div>';
+      html += '<div class="mb-card-row"><span class="mb-card-label">退傭2</span><span class="mb-card-val">' + Math.trunc((tx.commission2 || 0) * 10000).toLocaleString() + '</span></div>';
+      html += '<div class="mb-card-row"><span class="mb-card-label">NT輸贏</span><span class="mb-card-val ' + ((tx.ntResult || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + fmtNT(tx.ntResult) + '</span></div>';
+      html += '<div class="mb-card-row"><span class="mb-card-label">小計</span><span class="mb-card-val ' + ((tx.subtotal || 0) < 0 ? 'num-negative' : 'num-positive') + '">' + Math.round((tx.subtotal || 0) * 10000).toLocaleString() + '</span></div>';
+      html += '</div>';
+
+      // 開銷明細
+      var expenses = tx.expenses || [];
+      html += '<div class="mb-card-section">';
+      html += '<div class="mb-card-section-title">開銷明細</div>';
+      if (expenses.length === 0) {
+        html += '<div class="mb-card-row"><span class="mb-card-label">—</span></div>';
+      } else {
+        html += '<div class="mb-card-expense-table">';
+        html += '<div class="mb-card-expense-head"><span>項目</span><span>金額</span><span>匯率</span><span>NT</span></div>';
+        expenses.forEach(function(e) {
+          var nt = (e.amountHK || 0) * (e.exchangeRate || 0);
+          var qtyLabel = (e.quantity && e.quantity > 1) ? ' ×' + e.quantity : '';
+          html += '<div class="mb-card-expense-row">';
+          html += '<span>' + (e.name || '') + qtyLabel + '</span>';
+          html += '<span>' + fmtCardNum(e.amountHK || 0) + '</span>';
+          html += '<span>' + (e.exchangeRate || 0) + '</span>';
+          html += '<span>' + fmtCardNum(Math.round(nt)) + '</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+
+      // 總交收
+      html += '<div class="mb-card-footer">';
+      html += '<div class="mb-card-total">';
+      html += '<span class="mb-card-label">總交收金額NT</span>';
+      html += '<span class="mb-card-total-val ' + (totalNT >= 0 ? 'num-positive' : 'num-negative') + '">' + fmtCardNum(Math.round(totalNT)) + '</span>';
+      html += '</div>';
+      html += '</div>';
+
+      html += '</div>'; // pd-detail-card
+    });
+
+    // 合計
+    var grandTotal = mtxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
+    html += '<div class="pd-detail-total">';
+    html += '<span>合計總交收</span>';
+    html += '<span class="' + (grandTotal < 0 ? 'num-negative' : 'num-positive') + '">NT$ ' + fmtCardNum(Math.round(grandTotal)) + '</span>';
+    html += '</div>';
+
+    html += '</div>';
+
+    Modal.open('會員明細', html);
+  }
+
+  return { render: render, toggleMonth: toggleMonth, toggleCard: toggleCard, showMemberDetail: showMemberDetail };
 })();
 
 

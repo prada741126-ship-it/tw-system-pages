@@ -1370,6 +1370,112 @@ a { color: var(--accent); text-decoration: none; }
   .sh-kpi-grid { grid-template-columns: 1fr; }
 }
 
+/* pages/history.css — 歷史查詢頁 折疊卡片 */
+
+/* ===== 一級折疊：月份分組 ===== */
+.ht-month-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: var(--spacing-md);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.ht-month-header {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  user-select: none;
+  background: var(--bg-hover);
+  transition: background var(--transition-fast);
+}
+.ht-month-header:hover {
+  background: var(--bg-tertiary, var(--bg-hover));
+  filter: brightness(0.97);
+}
+.ht-month-icon {
+  font-size: var(--font-size-lg);
+}
+.ht-month-title {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.ht-month-stats {
+  flex: 1;
+  display: flex;
+  gap: var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  font-weight: 500;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ht-month-content {
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  background: var(--bg-primary);
+}
+
+/* 折疊動畫：與 settings.css 對齊 */
+.st-collapsible .st-collapsible-body {
+  max-height: 5000px;
+  overflow: hidden;
+  transition: max-height 0.35s ease, padding 0.35s ease, opacity 0.25s ease;
+  opacity: 1;
+}
+.st-collapsible.st-collapsed .st-collapsible-body {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+}
+.st-collapsible .st-toggle-icon {
+  display: inline-block;
+  transition: transform 0.25s ease;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  flex-shrink: 0;
+}
+.st-collapsible.st-collapsed .st-toggle-icon {
+  transform: rotate(-90deg);
+}
+
+/* ===== 二級折疊：團卡片（複用 pd-card 樣式） ===== */
+.ht-trip-card {
+  background: var(--bg-secondary);
+}
+
+/* 已封存徽章 */
+.ht-sealed-badge {
+  display: inline-block;
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: var(--success);
+  color: var(--text-inverse);
+  border-radius: var(--radius);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ===== 響應式 ===== */
+@media (max-width: 768px) {
+  .ht-month-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .ht-month-stats {
+    justify-content: flex-start;
+  }
+}
+
 /* pages/settings.css — 設定頁 費率/貴賓廳/門檻/密碼表單 */
 
 /* 月匯率設定卡片 */
