@@ -7305,7 +7305,9 @@ var HistoryPage = (function() {
 
       // 月份內的團按時間倒序
       trips.sort(function(a, b) {
-        return (b.sealedAt || b.endDate || '').localeCompare(a.sealedAt || a.endDate || '');
+        var bKey = String(b.sealedAt || b.endDate || '');
+        var aKey = String(a.sealedAt || a.endDate || '');
+        return bKey.localeCompare(aKey);
       });
 
       trips.forEach(function(trip) {
