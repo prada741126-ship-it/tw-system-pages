@@ -4335,8 +4335,16 @@ var RoomPage = (function() {
   };
 
   function render() {
-    var trips = Trips.getAll().filter(function(t) { return t.status !== TRIP_STATUS.SEALED; });
-    var allBookings = Bookings.getAll();
+    var allTrips = Trips.getAll();
+    var trips = allTrips.filter(function(t) { return t.status !== TRIP_STATUS.SEALED; });
+    var sealedTripIds = new Set(allTrips.filter(function(t) { return t.status === TRIP_STATUS.SEALED; }).map(function(t) { return t.id; }));
+
+    /* 若當前選中的團已被封存，清除選擇 */
+    if (_selectedTrip && sealedTripIds.has(_selectedTrip)) {
+      _selectedTrip = null;
+    }
+
+    var allBookings = Bookings.getAll().filter(function(b) { return !sealedTripIds.has(b.tripId); });
     var displayBookings = _selectedTrip ? allBookings.filter(function(b) { return b.tripId === _selectedTrip; }) : allBookings;
 
     /* === KPI 計算 === */
