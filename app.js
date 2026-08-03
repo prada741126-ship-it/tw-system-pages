@@ -631,8 +631,15 @@ function calcAgentQuota(agentId, memberTxs, bookings) {
     }
     return '';
   }
-  var agentTxs = (memberTxs || []).filter(function(t) { return _effectiveAgentId(t) === agentId; });
-  var agentBookings = (bookings || []).filter(function(b) { return _effectiveAgentId(b) === agentId; });
+  // 過濾掉已封存團的交易/訂房（封存後不再計入配額）
+  function _isNotSealed(t) {
+    if (!t.tripId || typeof Trips === 'undefined') return true;
+    var trip = Trips.getById(t.tripId);
+    if (!trip) return true;
+    return trip.status !== 'sealed';
+  }
+  var agentTxs = (memberTxs || []).filter(function(t) { return _effectiveAgentId(t) === agentId && _isNotSealed(t); });
+  var agentBookings = (bookings || []).filter(function(b) { return _effectiveAgentId(b) === agentId && _isNotSealed(b); });
 
   var totalWash = agentTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
   var totalThreshold = agentBookings.reduce(function(s, b) {
