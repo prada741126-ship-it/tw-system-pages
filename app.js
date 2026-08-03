@@ -2935,10 +2935,16 @@ var OverviewPage = (function() {
     var activeTrips = trips.filter(function(t) { return t.status === TRIP_STATUS.ACTIVE; });
     var pendingTrips = trips.filter(function(t) { return t.status === TRIP_STATUS.PENDING_SETTLEMENT; });
     var sealedTrips = trips.filter(function(t) { return t.status === TRIP_STATUS.SEALED; });
+    var sealedTripIds = new Set(sealedTrips.map(function(t) { return t.id; }));
     var members = Members.getAll();
     var agents = Agents.getAll();
     var shareholders = Shareholders.getAll();
-    var mtxs = MemberTxs.getAll();
+    var allMtxs = MemberTxs.getAll();
+    var currentMonth = new Date().toISOString().slice(0, 7);
+    /* KPI 與圖表口徑一致：本月 + 排除封存團 */
+    var mtxs = allMtxs.filter(function(t) {
+      return !sealedTripIds.has(t.tripId) && t.date && t.date.substring(0, 7) === currentMonth;
+    });
     var bookings = Bookings.getAll();
     var settings = Settings.load();
 
@@ -2965,12 +2971,10 @@ var OverviewPage = (function() {
     html += '<div class="ov-chart-row">';
 
     // 左：各廳洗碼佔比（迷你圓環）
-    var currentMonth = new Date().toISOString().slice(0, 7);
-    var monthTxs = mtxs.filter(function(t) { return t.date && t.date.substring(0, 7) === currentMonth; });
     var hallWash = {};
     var totalMonthWash = 0;
     VIP_HALLS.forEach(function(h) { hallWash[h.id] = 0; });
-    monthTxs.forEach(function(tx) {
+    mtxs.forEach(function(tx) {
       var hallId = tx.vipHallId || 'unknown';
       if (!tx.vipHallId && tx.tripId) {
         var trip = Trips.getById(tx.tripId);
@@ -3018,14 +3022,14 @@ var OverviewPage = (function() {
       var maxShWash = 0;
       var totalMonthlyOnlyWash = 0;
       shareholders.forEach(function(sh) {
-        var pd = calcShareholderProfit(sh, monthTxs, settings, currentMonth);
+        var pd = calcShareholderProfit(sh, mtxs, settings, currentMonth);
         if (pd.personalWash > maxShWash) maxShWash = pd.personalWash;
         totalMonthlyOnlyWash += (pd.monthlyOnlyWash || 0);
       });
       if (totalMonthlyOnlyWash > maxShWash) maxShWash = totalMonthlyOnlyWash;
       html += '<div class="ov-sh-bar-list">';
       shareholders.forEach(function(sh, idx) {
-        var pd = calcShareholderProfit(sh, monthTxs, settings, currentMonth);
+        var pd = calcShareholderProfit(sh, mtxs, settings, currentMonth);
         var barPct = maxShWash > 0 ? (pd.personalWash / maxShWash * 100) : 0;
         var barColor = shColors[idx % shColors.length];
         html += '<div class="ov-sh-bar-row">';
