@@ -887,6 +887,39 @@ function filterNotDeleted(arr) {
   return (arr || []).filter(function(item) { return !item._deleted; });
 }
 
+/**
+ * 過濾掉已封存(sealed)團的訂房
+ * 處理 tripId 為空的 Bot 訂房：用 agentId 反查代理是否有活躍(active)團
+ * @param {Array} bookings - 所有訂房
+ * @param {Array} trips - 所有團
+ * @returns {Array} 過濾後的訂房（排除已封存團的）
+ */
+function filterActiveBookings(bookings, trips) {
+  var sealedTripIds = {};
+  var agentHasActiveTrip = {};
+  var tripsById = {};
+
+  (trips || []).forEach(function(t) {
+    tripsById[t.id] = t;
+    if (t.status === 'sealed') {
+      sealedTripIds[t.id] = true;
+    }
+    if (t.status === 'active' && t.agentId) {
+      agentHasActiveTrip[t.agentId] = true;
+    }
+  });
+
+  return (bookings || []).filter(function(b) {
+    /* 有 tripId 且該團已封存 → 過濾掉 */
+    if (b.tripId && sealedTripIds[b.tripId]) return false;
+    /* tripId 為空或找不到對應團 → 用 agentId 判斷，代理無活躍團則視為已封存 */
+    if ((!b.tripId || !tripsById[b.tripId]) && b.agentId) {
+      return agentHasActiveTrip[b.agentId] === true;
+    }
+    return true;
+  });
+}
+
 // 跨月判断
 function overlapsMonth(checkIn, checkOut, monthStr) {
   if (!checkIn || !checkOut) return false;
@@ -934,6 +967,7 @@ if (typeof module !== 'undefined' && module.exports) {
     filterByShareholder: filterByShareholder,
     filterByStatus: filterByStatus,
     filterNotDeleted: filterNotDeleted,
+    filterActiveBookings: filterActiveBookings,
     overlapsMonth: overlapsMonth,
     sortBy: sortBy,
     compareByDate: compareByDate,
@@ -2935,15 +2969,14 @@ var OverviewPage = (function() {
     var activeTrips = trips.filter(function(t) { return t.status === TRIP_STATUS.ACTIVE; });
     var pendingTrips = trips.filter(function(t) { return t.status === TRIP_STATUS.PENDING_SETTLEMENT; });
     var sealedTrips = trips.filter(function(t) { return t.status === TRIP_STATUS.SEALED; });
-    var sealedTripIds = new Set(sealedTrips.map(function(t) { return t.id; }));
     var members = Members.getAll();
     var agents = Agents.getAll();
     var shareholders = Shareholders.getAll();
     var allMtxs = MemberTxs.getAll();
     var currentMonth = new Date().toISOString().slice(0, 7);
-    /* KPI 與圖表口徑一致：本月 + 排除封存團 */
-    var mtxs = allMtxs.filter(function(t) {
-      return !sealedTripIds.has(t.tripId) && t.date && t.date.substring(0, 7) === currentMonth;
+    /* KPI 與圖表口徑一致：本月 + 排除封存團（含 tripId 為空的 Bot 訂房代理反查） */
+    var mtxs = filterActiveBookings(allMtxs, trips).filter(function(t) {
+      return t.date && t.date.substring(0, 7) === currentMonth;
     });
     var bookings = Bookings.getAll();
     var settings = Settings.load();
@@ -4348,7 +4381,7 @@ var RoomPage = (function() {
       _selectedTrip = null;
     }
 
-    var allBookings = Bookings.getAll().filter(function(b) { return !sealedTripIds.has(b.tripId); });
+    var allBookings = filterActiveBookings(Bookings.getAll(), allTrips);
     var displayBookings = _selectedTrip ? allBookings.filter(function(b) { return b.tripId === _selectedTrip; }) : allBookings;
 
     /* === KPI 計算 === */
