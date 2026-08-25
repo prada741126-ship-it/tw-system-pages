@@ -131,6 +131,7 @@ a { color: var(--accent); text-decoration: none; }
 .sidebar-brand .brand-icon { font-size: 32px; color: var(--gold); }
 .sidebar-brand .brand-title { font-size: var(--font-size-lg); font-weight: 700; margin-top: var(--spacing-xs); }
 .sidebar-brand .brand-sub { font-size: var(--font-size-sm); color: var(--text-secondary); }
+.sidebar-brand .brand-full { width: 140px; height: auto; display: block; margin: 0 auto; }
 .nav-list { list-style: none; }
 .nav-item {
   display: flex; align-items: center; gap: var(--spacing-sm);
@@ -147,6 +148,19 @@ a { color: var(--accent); text-decoration: none; }
 .page-section.active { display: block; }
 .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-lg); }
 .topbar h2 { font-size: var(--font-size-xl); }
+.topbar-right { display: flex; align-items: center; gap: var(--spacing-md); }
+.user-chip { display: flex; align-items: center; gap: var(--spacing-xs); }
+.user-chip .user-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); }
+.user-chip .user-role {
+  font-size: var(--font-size-xs); padding: 2px 8px; border-radius: 999px;
+  background: var(--bg-hover); color: var(--text-secondary);
+}
+.logout-btn {
+  padding: 6px 14px; border-radius: var(--radius); border: 1px solid var(--border);
+  background: transparent; color: var(--text-secondary); font-size: var(--font-size-sm);
+  cursor: pointer; transition: all var(--transition-fast);
+}
+.logout-btn:hover { border-color: var(--danger); color: var(--danger); }
 
 /* components.css — 共用元件（按鈕/卡片/表格/輸入框/狀態標籤/子表格/彈窗/登入/分頁/響應式/列印） */
 
@@ -261,6 +275,7 @@ a { color: var(--accent); text-decoration: none; }
   border-radius: var(--radius-lg); padding: var(--spacing-xl); width: 360px; text-align: center;
 }
 .login-box .login-icon { font-size: 48px; color: var(--gold); margin-bottom: var(--spacing-md); }
+.login-box .brand-full { width: 240px; height: auto; display: block; margin: 0 auto var(--spacing-sm); }
 .login-box h1 { color: var(--login-text); font-size: var(--font-size-xl); margin-bottom: var(--spacing-xs); }
 .login-box .login-sub { color: var(--login-text-muted); font-size: var(--font-size-sm); margin-bottom: var(--spacing-lg); }
 .login-box input {
@@ -271,7 +286,14 @@ a { color: var(--accent); text-decoration: none; }
 .login-box input:focus { outline: none; border-color: var(--gold); }
 .login-box button {
   width: 100%; padding: 12px; background: var(--gold); color: var(--text-primary); border: none;
-  border-radius: var(--radius); font-size: var(--font-size-lg); font-weight: 600;
+  border-radius: var(--radius); font-size: var(--font-size-lg); font-weight: 600; cursor: pointer;
+}
+.login-box button:active { transform: scale(0.98); }
+.login-box button:disabled { opacity: 0.7; cursor: wait; }
+#setup-overlay {
+  display: flex; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(135deg, var(--login-bg-1) 0%, var(--login-bg-2) 50%, var(--login-bg-3) 100%);
+  align-items: center; justify-content: center; z-index: 2000;
 }
 .login-box.shake { animation: shake 0.4s; }
 
