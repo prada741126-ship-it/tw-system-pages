@@ -23,6 +23,7 @@ var APP = {
 // ============================================================================
 var CONFIG = {
   SESSION_TIMEOUT:    30 * 60 * 1000,
+  OFFLINE_GRACE_MS:   7 * 24 * 60 * 60 * 1000, /* 帳號離線登入寬限（與 APP pilot 一致） */
   MAX_PW_ATTEMPTS:    5,
   LOCK_DURATION:      60 * 1000,
   TOMBSTONE_TTL_MS:   30 * 24 * 60 * 60 * 1000,
@@ -54,6 +55,7 @@ var STORAGE_KEYS = {
   LOANS:             'tw1_loans',
   PENDING_EXPS:      'tw1_pending_exps',
   AUTH:              'tw1_auth',
+  USERS:             'tw1_users',
   PWD_HASH:          'tw1_pwd_hash',
   LAST_SYNC_TIME:    'tw1_last_sync_time',
   RECENTLY_DELETED:  'tw1_recently_deleted',
@@ -102,6 +104,7 @@ var FB_PATH = {
   WALLET_TXS:     'taiwan_data/walletTxs',
   LOANS:          'taiwan_data/loans',
   PENDING_EXPS:   'taiwan_data/pendingExps',
+  USERS:          'taiwan_data/users',
   CLEARED:        'taiwan_data/clearedAt',
   CONNECTED:      '.info/connected',
 };
@@ -509,11 +512,13 @@ var Router = (function() {
 
 // === src/core/auth.js ===
 /**
- * core/auth.js — 认证 (SHA-256 密码)
- * 依赖: core/constants.js
+ * core/auth.js — 账号认证（与 APP pilot 共用 taiwan_data/users 帐号系统）
+ * 机制：sha256(email:pwd) 比对 users.pwdHash；云端优先，离线用本机缓存（7 天宽限）
+ * 依赖: core/constants.js, sync/firebase.js, sync/uploader.js, core/store.js
  */
 var Auth = (function() {
-  var _authenticated = false;
+  var _session = null;
+  var _offline = false;
   var _lastActivity = 0;
 
   async function sha256(text) {
@@ -525,50 +530,240 @@ var Auth = (function() {
     }).join('');
   }
 
-  /* 当前生效的密码 hash：优先读自订（localStorage），无则用编译常量默认值 */
-  function getPwdHash() {
+  /* 帐号凭据哈希：sha256(email + ':' + pwd)（email 当盐，与 APP 一致） */
+  function _credentialHash(email, pwd) {
+    return sha256(String(email || '').toLowerCase() + ':' + String(pwd || ''));
+  }
+
+  function _readCache() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.AUTH) || 'null'); } catch (e) { return null; }
+  }
+  function _writeCache(cache) {
+    try { localStorage.setItem(STORAGE_KEYS.AUTH, JSON.stringify(cache)); } catch (e) {}
+  }
+
+  function _withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise(function(_, reject) { setTimeout(function() { reject(new Error('timeout')); }, ms); }),
+    ]);
+  }
+
+  /* 雲端 users 集合（Map<uid, record>）；離線/逾時回 null */
+  async function _fetchCloudUsers() {
     try {
-      var custom = localStorage.getItem(STORAGE_KEYS.PWD_HASH);
-      if (custom) return custom;
+      return await _withTimeout(FirebaseSync.once(FB_PATH.USERS), 12000);
+    } catch (e) { return null; }
+  }
+
+  function _findUserByEmail(map, email) {
+    var e = String(email || '').toLowerCase();
+    var found = null;
+    Object.keys(map || {}).forEach(function(k) {
+      var u = map[k];
+      if (u && !u._deleted && !found && String(u.email || '').toLowerCase() === e) found = u;
+    });
+    return found;
+  }
+
+  /* 本機 users 快取（登入成功時回寫，供離線登入與改密碼用） */
+  function _saveLocalUsers(map) {
+    try {
+      var arr = Object.keys(map || {}).map(function(k) { return map[k]; });
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(arr));
     } catch (e) {}
-    return APP.PWD_HASH;
+  }
+  function _localUsers() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]'); } catch (e) { return []; }
   }
 
-  async function verify(password) {
-    var hash = await sha256(password);
-    if (hash === getPwdHash()) {
-      _authenticated = true;
-      _lastActivity = Date.now();
-      Store.write(STORAGE_KEYS.AUTH, { time: _lastActivity });
-      return true;
+  async function _applySession(user, online, pwd) {
+    _session = {
+      uid: user.id || user.uid || '',
+      email: user.email || '',
+      name: user.name || '',
+      role: user.role || 'viewer',
+      lastVerifiedAt: online ? Date.now() : (user.lastVerifiedAt || Date.now()),
+    };
+    _offline = !online;
+    _lastActivity = Date.now();
+    var prev = _readCache() || {};
+    _writeCache({
+      uid: _session.uid,
+      email: _session.email,
+      name: _session.name,
+      role: _session.role,
+      lastVerifiedAt: _session.lastVerifiedAt,
+      pwdHash: pwd ? await sha256(pwd) : (prev.pwdHash || null), /* 離線登入比對用（明碼的 hash） */
+    });
+  }
+
+  /* 離線登入：比對本機快取（7 天內有線上驗證過才有效） */
+  async function _offlineLogin(email, pwd) {
+    var cache = _readCache();
+    if (!cache || cache.email !== email) {
+      return { ok: false, error: '無法連線驗證，且本機沒有此帳號的離線登入資料' };
     }
-    return false;
+    var hash = await sha256(pwd);
+    if (!hash || hash !== cache.pwdHash) return { ok: false, error: '帳號或密碼錯誤（離線）' };
+    if (Date.now() - (cache.lastVerifiedAt || 0) > CONFIG.OFFLINE_GRACE_MS) {
+      return { ok: false, error: '離線授權已過期（超過 7 天未連線驗證），請連線後重新登入' };
+    }
+    await _applySession(cache, false, null);
+    return { ok: true, offline: true };
   }
 
-  /* 修改密码：新 hash 持久化到 localStorage（换浏览器/清缓存时回到默认密码） */
-  async function setPwdHash(hash) {
-    try { localStorage.setItem(STORAGE_KEYS.PWD_HASH, hash); } catch (e) {}
-    APP.PWD_HASH = hash;
+  /* 帳號登入（與 APP 共用 taiwan_data/users） */
+  async function login(email, pwd) {
+    email = String(email || '').trim().toLowerCase();
+    if (!email || !pwd) return { ok: false, error: '請輸入帳號與密碼' };
+    var cloudUsers = await _fetchCloudUsers();
+    var online = !!cloudUsers;
+    if (online) _saveLocalUsers(cloudUsers);
+    var user = online ? _findUserByEmail(cloudUsers, email) : _localUsers().find(function(u) {
+      return !u._deleted && String(u.email || '').toLowerCase() === email;
+    });
+    if (!user) {
+      if (online) return { ok: false, error: '帳號或密碼錯誤' };
+      return _offlineLogin(email, pwd);
+    }
+    if (user.enabled === false) return { ok: false, error: '帳號已停用，請聯絡管理員' };
+    var hash = await _credentialHash(email, pwd);
+    if (!hash || !user.pwdHash || user.pwdHash !== hash) {
+      return { ok: false, error: '帳號或密碼錯誤' };
+    }
+    await _applySession(user, online, pwd);
+    return { ok: true, offline: !online };
   }
+
+  /* 啟動時還原 session（7 天內有線上驗證過才有效） */
+  function restoreSession() {
+    if (_session) return true;
+    var cache = _readCache();
+    if (!cache || !cache.uid || !cache.role) return false;
+    if (Date.now() - (cache.lastVerifiedAt || 0) > CONFIG.OFFLINE_GRACE_MS) return false;
+    _session = {
+      uid: cache.uid, email: cache.email || '', name: cache.name || '',
+      role: cache.role, lastVerifiedAt: cache.lastVerifiedAt || 0,
+    };
+    _offline = true;
+    _lastActivity = Date.now();
+    return true;
+  }
+
+  /* 是否需要首次設定（雲端 users 為空） */
+  async function needsSetup() {
+    try {
+      var remote = await _withTimeout(FirebaseSync.once(FB_PATH.USERS), 8000);
+      return !remote || Object.keys(remote).length === 0;
+    } catch (e) {
+      return _localUsers().filter(function(u) { return u && !u._deleted; }).length === 0;
+    }
+  }
+
+  function _newUid() {
+    return 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  /* 首次設定：建立 super_admin（與 APP setupFirstAdmin 相容，寫同一集合） */
+  async function setupFirstAdmin(name, email, pwd) {
+    name = String(name || '').trim();
+    email = String(email || '').trim().toLowerCase();
+    if (!name) return { ok: false, error: '請輸入姓名' };
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'Email 格式不正確' };
+    if (String(pwd || '').length < 6) return { ok: false, error: '密碼至少需要 6 位' };
+    if (!FirebaseSync.isReady()) return { ok: false, error: '首次設定需要網路連線，請確認網路後重試' };
+    try {
+      var remote = null;
+      try { remote = await _withTimeout(FirebaseSync.once(FB_PATH.USERS), 10000); } catch (e) {}
+      if (remote && Object.keys(remote).length > 0) {
+        return { ok: false, error: '系統已有管理員帳號，請直接登入' };
+      }
+      var uid = _newUid();
+      var user = {
+        id: uid, email: email, name: name, role: 'super_admin',
+        permissions: {}, enabled: true,
+        pwdHash: await _credentialHash(email, pwd),
+        createdAt: Date.now(), _updatedAt: Date.now(),
+      };
+      await FirebaseSync.put(FB_PATH.USERS + '/' + uid, user);
+      _saveLocalUsers((remote || {}));
+      /* 本機快取補上此帳號 */
+      var arr = _localUsers(); arr.push(user); _saveLocalUsers({});
+      try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(arr)); } catch (e) {}
+      await _applySession(user, true, pwd);
+      return { ok: true, uid: uid };
+    } catch (e) {
+      return { ok: false, error: '建立失敗：' + ((e && e.message) || '未知錯誤') };
+    }
+  }
+
+  /* 本人修改密碼：驗證原密碼後更新雲端 pwdHash（與 APP changeMyPassword 相容） */
+  async function changeMyPassword(oldPwd, newPwd) {
+    var me = getCurrent();
+    if (!me) return { ok: false, error: '尚未登入' };
+    if (String(newPwd || '').length < 6) return { ok: false, error: '新密碼至少需要 6 位' };
+    var cloudUsers = await _fetchCloudUsers();
+    var online = !!cloudUsers;
+    var user = null;
+    if (online) {
+      user = cloudUsers[me.uid] || _findUserByEmail(cloudUsers, me.email);
+    } else {
+      user = _localUsers().find(function(u) { return u.id === me.uid; }) || null;
+    }
+    if (!user) return { ok: false, error: '找不到本人帳號資料' };
+    var oldHash = await _credentialHash(me.email, oldPwd);
+    if (!oldHash || oldHash !== user.pwdHash) return { ok: false, error: '原密碼不正確' };
+    var newHash = await _credentialHash(me.email, newPwd);
+    if (online) {
+      await FirebaseSync.put(FB_PATH.USERS + '/' + user.id + '/pwdHash', newHash);
+      await FirebaseSync.put(FB_PATH.USERS + '/' + user.id + '/_updatedAt', Date.now());
+    }
+    /* 更新本機快取 */
+    var arr = _localUsers();
+    var idx = arr.findIndex(function(u) { return u.id === user.id; });
+    if (idx >= 0) { arr[idx].pwdHash = newHash; }
+    else { user.pwdHash = newHash; arr.push(user); }
+    try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(arr)); } catch (e) {}
+    var cache = _readCache() || {};
+    cache.pwdHash = await sha256(newPwd);
+    if (cache.uid) _writeCache(cache);
+    return { ok: true };
+  }
+
+  function logout() {
+    _session = null;
+    _offline = false;
+    try { localStorage.removeItem(STORAGE_KEYS.AUTH); } catch (e) {}
+  }
+
+  function getCurrent() { return _session; }
+  function isOffline() { return _offline; }
+  function touch() { _lastActivity = Date.now(); }
 
   function isAuthenticated() {
-    if (!_authenticated) return false;
+    if (!_session) return false;
     if (Date.now() - _lastActivity > CONFIG.SESSION_TIMEOUT) {
-      _authenticated = false;
+      _session = null;
       return false;
     }
     _lastActivity = Date.now();
     return true;
   }
 
-  function logout() {
-    _authenticated = false;
-    Store.remove(STORAGE_KEYS.AUTH);
-  }
-
-  function touch() { _lastActivity = Date.now(); }
-
-  return { verify: verify, sha256: sha256, getPwdHash: getPwdHash, setPwdHash: setPwdHash, isAuthenticated: isAuthenticated, logout: logout, touch: touch };
+  return {
+    login: login,
+    restoreSession: restoreSession,
+    needsSetup: needsSetup,
+    setupFirstAdmin: setupFirstAdmin,
+    changeMyPassword: changeMyPassword,
+    logout: logout,
+    getCurrent: getCurrent,
+    isOffline: isOffline,
+    isAuthenticated: isAuthenticated,
+    touch: touch,
+    sha256: sha256,
+  };
 })();
 
 
@@ -8009,11 +8204,12 @@ var SettingsPage = (function() {
     html += '</tbody></table>';
     html += '</div></div>';
 
-    // 修改密码
+    // 修改密码（帳號制：與 APP 共用帳號，驗證原密碼後更新）
     html += '<div class="card">';
     html += '<div class="card-header"><h3>修改密碼</h3></div>';
     html += '<div class="form-row">';
-    html += '<div class="form-group"><label>新密碼</label><input type="password" id="set-new-pwd" class="form-input"></div>';
+    html += '<div class="form-group"><label>原密碼</label><input type="password" id="set-old-pwd" class="form-input"></div>';
+    html += '<div class="form-group"><label>新密碼（至少6位）</label><input type="password" id="set-new-pwd" class="form-input"></div>';
     html += '<div class="form-group" style="align-self:flex-end;"><button class="btn btn-primary" onclick="SettingsPage.changePwd()">更新密碼</button></div>';
     html += '</div></div>';
 
@@ -8062,14 +8258,20 @@ var SettingsPage = (function() {
   }
 
   function changePwd() {
-    var pwd = document.getElementById('set-new-pwd').value;
-    if (!pwd || pwd.length < 4) { Toast.error('密碼至少4位'); return; }
-    /* 直接对新密码做 hash 并持久化（旧实现误用 Auth.verify 比对旧 hash，永远失败且不存盘） */
-    Auth.sha256(pwd).then(function(hash) {
-      Auth.setPwdHash(hash).then(function() {
-        document.getElementById('set-new-pwd').value = '';
+    var oldEl = document.getElementById('set-old-pwd');
+    var newEl = document.getElementById('set-new-pwd');
+    var oldPwd = oldEl ? oldEl.value : '';
+    var pwd = newEl ? newEl.value : '';
+    if (!oldPwd) { Toast.error('請輸入原密碼'); return; }
+    if (!pwd || pwd.length < 6) { Toast.error('新密碼至少6位'); return; }
+    /* 帳號制：與 APP 共用帳號，驗證原密碼後更新雲端 pwdHash */
+    Auth.changeMyPassword(oldPwd, pwd).then(function(res) {
+      if (res.ok) {
+        oldEl.value = ''; newEl.value = '';
         Toast.success('密碼已更新，下次登入請使用新密碼');
-      });
+      } else {
+        Toast.error(res.error || '密碼更新失敗');
+      }
     });
   }
 
@@ -8237,7 +8439,7 @@ function exposeGlobals() {
 // === src/app.js ===
 /**
  * app.js — 主应用入口
- * 初始化 Firebase + 加载数据 + 启动监听 + 渲染首页
+ * 初始化 Firebase + 帳號登入閘門 + 加载数据 + 启动监听 + 渲染首页
  */
 
 function onPageChange(pageName) {
@@ -8313,66 +8515,142 @@ function initApp() {
       console.warn('[App] Firebase 未连接，离线模式');
     }
 
-    // 5. 渲染首页
+    // 5. 渲染首页 + 使用者資訊
+    renderUserChip();
     OverviewPage.render();
   });
 
 }
 
+/* ===== 帳號登入閘門（與 APP 共用 taiwan_data/users） ===== */
+
+function renderUserChip() {
+  var chip = document.getElementById('user-chip');
+  if (!chip) return;
+  var me = Auth.getCurrent();
+  if (!me) { chip.innerHTML = ''; return; }
+  var roleLabel = me.role === 'super_admin' ? '超級管理員' : (me.role === 'admin' ? '管理員' : '檢視');
+  chip.innerHTML = '<span class="user-name">' + (me.name || me.email) + '</span><span class="user-role">' + roleLabel + '</span>';
+}
+
 function showLogin() {
-  var overlay = document.getElementById('login-overlay');
+  var login = document.getElementById('login-overlay');
+  var setup = document.getElementById('setup-overlay');
   var app = document.getElementById('app');
-  if (overlay) overlay.style.display = 'flex';
+  if (login) login.style.display = 'flex';
+  if (setup) setup.style.display = 'none';
+  if (app) app.style.display = 'none';
+  var emailEl = document.getElementById('login-email');
+  if (emailEl) emailEl.focus();
+}
+
+function showSetup() {
+  var login = document.getElementById('login-overlay');
+  var setup = document.getElementById('setup-overlay');
+  var app = document.getElementById('app');
+  if (login) login.style.display = 'none';
+  if (setup) setup.style.display = 'flex';
   if (app) app.style.display = 'none';
 }
 
 function showApp() {
-  var overlay = document.getElementById('login-overlay');
+  var login = document.getElementById('login-overlay');
+  var setup = document.getElementById('setup-overlay');
   var app = document.getElementById('app');
-  if (overlay) overlay.style.display = 'none';
+  if (login) login.style.display = 'none';
+  if (setup) setup.style.display = 'none';
   if (app) app.style.display = '';
   initApp();
 }
 
-async function handleLogin() {
-  var input = document.getElementById('login-pwd');
-  if (!input) return;
-  var pwd = input.value;
-  if (!pwd) return;
-  var ok = await Auth.verify(pwd);
-  if (ok) {
-    showApp();
-  } else {
-    Toast.error('密碼錯誤');
-    input.value = '';
-    input.focus();
-    var box = document.querySelector('.login-box');
-    if (box) {
-      box.classList.add('shake');
-      setTimeout(function() { box.classList.remove('shake'); }, 500);
-    }
+function _shakeLoginBox() {
+  var box = document.querySelector('#login-overlay .login-box, #setup-overlay .login-box');
+  if (box) {
+    box.classList.add('shake');
+    setTimeout(function() { box.classList.remove('shake'); }, 500);
   }
 }
 
-// 启动
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', function() {
-    exposeGlobals();
-    loadAllData();
-    Keyboard.init();
-    FirebaseSync.init().then(function() {
-      if (FirebaseSync.isReady()) Watchers.init();
-      OverviewPage.render();
-    });
-  });
-} else {
+async function handleLogin() {
+  var emailEl = document.getElementById('login-email');
+  var input = document.getElementById('login-pwd');
+  var btn = document.getElementById('login-btn');
+  if (!input) return;
+  var email = String((emailEl && emailEl.value) || '').trim();
+  var pwd = input.value;
+  if (!email || !pwd) { Toast.error('請輸入帳號與密碼'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = '驗 證 中 …'; }
+  var res;
+  try {
+    res = await Auth.login(email, pwd);
+  } catch (e) {
+    res = { ok: false, error: '登入失敗：' + ((e && e.message) || '未知錯誤') };
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '進 入 系 統'; }
+  if (res.ok) {
+    input.value = '';
+    showApp();
+  } else {
+    Toast.error(res.error || '登入失敗');
+    input.value = '';
+    input.focus();
+    _shakeLoginBox();
+  }
+}
+
+async function handleSetup() {
+  var nameEl = document.getElementById('setup-name');
+  var emailEl = document.getElementById('setup-email');
+  var pwdEl = document.getElementById('setup-pwd');
+  var pwd2El = document.getElementById('setup-pwd2');
+  var btn = document.getElementById('setup-btn');
+  if (!nameEl || !emailEl || !pwdEl || !pwd2El) return;
+  var pwd = pwdEl.value, pwd2 = pwd2El.value;
+  if (pwd !== pwd2) { Toast.error('兩次輸入的密碼不一致'); pwd2El.focus(); _shakeLoginBox(); return; }
+  if (btn) { btn.disabled = true; btn.textContent = '建 立 中 …'; }
+  var res;
+  try {
+    res = await Auth.setupFirstAdmin(nameEl.value, emailEl.value, pwd);
+  } catch (e) {
+    res = { ok: false, error: '建立失敗：' + ((e && e.message) || '未知錯誤') };
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '建 立 管 理 員 帳 號'; }
+  if (res.ok) {
+    Toast.success('管理員帳號已建立');
+    showApp();
+  } else {
+    Toast.error(res.error || '建立失敗');
+    _shakeLoginBox();
+  }
+}
+
+function handleLogout() {
+  Auth.logout();
+  /* 重新載入：清空渲染狀態並回到登入畫面 */
+  window.location.reload();
+}
+
+/* ===== 啟動：Firebase → 帳號閘門 → 主應用 ===== */
+
+function boot() {
   exposeGlobals();
   loadAllData();
   Keyboard.init();
   FirebaseSync.init().then(function() {
-    if (FirebaseSync.isReady()) Watchers.init();
-    OverviewPage.render();
+    /* 已有有效 session（7 天內驗證過）→ 直接進入 */
+    if (Auth.restoreSession()) { showApp(); return; }
+    /* 無 session → 判斷首次設定 or 登入 */
+    Auth.needsSetup().then(function(need) {
+      if (need) showSetup();
+      else showLogin();
+    }).catch(function() { showLogin(); });
   });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot);
+} else {
+  boot();
 }
 
 
