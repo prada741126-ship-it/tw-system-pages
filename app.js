@@ -51,6 +51,7 @@ var STORAGE_KEYS = {
   HOTEL_CONFIG:      'tw1_hotel_config',
   EMPLOYEE_LIST:     'tw1_employee_list',
   AUTH:              'tw1_auth',
+  PWD_HASH:          'tw1_pwd_hash',
   LAST_SYNC_TIME:    'tw1_last_sync_time',
   RECENTLY_DELETED:  'tw1_recently_deleted',
   APP_VERSION:       'tw1_app_version',
@@ -325,6 +326,41 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 
 
+// === src/core/time.js ===
+/**
+ * core/time.js — 台北時區 (UTC+8) 日期工具
+ * 依賴: 无（零依赖模块）
+ * 影响: 所有需要「当地日期/月份」的页面与数据层
+ * 说明: new Date().toISOString() 是 UTC，台北 0-8 点会差一天（月初会差一个月）。
+ *       统一改用本模块，与 bot 端 todayStr 口径一致。
+ */
+
+/* 以 UTC+8 视角取「台北墙上时间」（结果再取 toISOString 即台北日期） */
+function taipeiNow() {
+  return new Date(Date.now() + 8 * 3600 * 1000);
+}
+
+/* 台北今天 YYYY-MM-DD */
+function todayStr() {
+  return taipeiNow().toISOString().slice(0, 10);
+}
+
+/* 台北当前月份 YYYY-MM */
+function currentMonthStr() {
+  return taipeiNow().toISOString().slice(0, 7);
+}
+
+/* 时间戳 → 台北日期 YYYY-MM-DD（如封存日显示，避免 UTC 差一天） */
+function dateStrFromTs(ts) {
+  if (!ts) return '';
+  return new Date(ts + 8 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { taipeiNow: taipeiNow, todayStr: todayStr, currentMonthStr: currentMonthStr, dateStrFromTs: dateStrFromTs };
+}
+
+
 // === src/core/events.js ===
 /**
  * core/events.js — Event Bus (发布订阅)
@@ -475,15 +511,30 @@ var Auth = (function() {
     }).join('');
   }
 
+  /* 当前生效的密码 hash：优先读自订（localStorage），无则用编译常量默认值 */
+  function getPwdHash() {
+    try {
+      var custom = localStorage.getItem(STORAGE_KEYS.PWD_HASH);
+      if (custom) return custom;
+    } catch (e) {}
+    return APP.PWD_HASH;
+  }
+
   async function verify(password) {
     var hash = await sha256(password);
-    if (hash === APP.PWD_HASH) {
+    if (hash === getPwdHash()) {
       _authenticated = true;
       _lastActivity = Date.now();
       Store.write(STORAGE_KEYS.AUTH, { time: _lastActivity });
       return true;
     }
     return false;
+  }
+
+  /* 修改密码：新 hash 持久化到 localStorage（换浏览器/清缓存时回到默认密码） */
+  async function setPwdHash(hash) {
+    try { localStorage.setItem(STORAGE_KEYS.PWD_HASH, hash); } catch (e) {}
+    APP.PWD_HASH = hash;
   }
 
   function isAuthenticated() {
@@ -503,7 +554,7 @@ var Auth = (function() {
 
   function touch() { _lastActivity = Date.now(); }
 
-  return { verify: verify, isAuthenticated: isAuthenticated, logout: logout, touch: touch };
+  return { verify: verify, sha256: sha256, getPwdHash: getPwdHash, setPwdHash: setPwdHash, isAuthenticated: isAuthenticated, logout: logout, touch: touch };
 })();
 
 
@@ -1656,19 +1707,25 @@ var Trips = (function() {
   }
   function create(data) {
     var now = Date.now();
-    var dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    var seq = (getAll().filter(function(t) {
-      return t.id && t.id.indexOf('T' + dateStr) === 0;
-    }).length + 1).toString().padStart(3, '0');
+    var dateStr = todayStr().replace(/-/g, '');
+    /* 序号取「同日所有团（含已删除墓碑）」的最大值+1，防止删除后撞号 */
+    var seq = 1;
+    (State.get('trips') || []).forEach(function(t) {
+      if (t.id && t.id.indexOf('T' + dateStr) === 0) {
+        var n = parseInt(t.id.substring(1 + dateStr.length), 10);
+        if (!isNaN(n) && n >= seq) seq = n + 1;
+      }
+    });
+    var seqStr = String(seq).padStart(3, '0');
 
     var trip = {
-      id: 'T' + dateStr + seq,
+      id: 'T' + dateStr + seqStr,
       shareholderId: data.shareholderId || '',
       agentId: data.agentId || '',
       vipHallId: data.vipHallId || '',
       hallIds: data.hallIds || [],
       memberIds: data.memberIds || [],
-      startDate: new Date().toISOString().slice(0, 10),
+      startDate: todayStr(),
       endDate: null,
       status: TRIP_STATUS.ACTIVE,
       lastSettlementDate: null,
@@ -1702,10 +1759,10 @@ var Trips = (function() {
     var trip = getById(id);
     if (!trip) return null;
     var lastDate = trip.lastSettlementDate || trip.startDate;
-    var sealedMonth = lastDate ? lastDate.substring(0, 7) : new Date().toISOString().substring(0, 7);
+    var sealedMonth = lastDate ? lastDate.substring(0, 7) : currentMonthStr();
     return update(id, {
       status: TRIP_STATUS.SEALED,
-      endDate: new Date().toISOString().slice(0, 10),
+      endDate: todayStr(),
       sealedAt: Date.now(),
       sealedMonth: sealedMonth,
     });
@@ -1779,12 +1836,13 @@ var MemberTxs = (function() {
     var idx = arr.findIndex(function(t) { return t.id === id; });
     if (idx < 0) return null;
 
-    // 如果改了输入项，重新计算
+    // 如果改了输入项，重新计算（customerUp/Down 影響 verifyStatus）
     var merged = Object.assign({}, arr[idx], patch);
     if (patch.outCode !== undefined || patch.backCode !== undefined ||
         patch.washCode !== undefined || patch.rate1 !== undefined ||
         patch.rebate1 !== undefined || patch.rate2 !== undefined ||
-        patch.rebate2 !== undefined || patch.expenses !== undefined) {
+        patch.rebate2 !== undefined || patch.expenses !== undefined ||
+        patch.customerUp !== undefined || patch.customerDown !== undefined) {
       var calcResult = calcMemberTx(merged);
       Object.assign(merged, calcResult);
     }
@@ -1941,7 +1999,7 @@ var Supplements = (function() {
   }
   function create(data) {
     var now = Date.now();
-    var amountNT = (data.amountHK || 0) * (data.exchangeRate || 0);
+    var amountNT = (data.amountHK || 0) * (data.exchangeRate || 4.2);
     var settlementAmount = roundDown(amountNT, -2);
 
     var sup = {
@@ -1959,7 +2017,7 @@ var Supplements = (function() {
       status: data.status || 'pending',
       sealedAt: null,
       originalMonth: data.originalMonth || '',
-      createdDate: new Date().toISOString().slice(0, 10),
+      createdDate: todayStr(),
       collectedAt: null,
       createdAt: now,
       _fbKey: 'sup_' + (data.id || now),
@@ -1979,7 +2037,7 @@ var Supplements = (function() {
     if (idx < 0) return null;
     var merged = Object.assign({}, arr[idx], patch);
     if (patch.amountHK !== undefined || patch.exchangeRate !== undefined) {
-      merged.amountNT = (merged.amountHK || 0) * (merged.exchangeRate || 0);
+      merged.amountNT = (merged.amountHK || 0) * (merged.exchangeRate || 4.2);
       merged.settlementAmount = roundDown(merged.amountNT, -2);
     }
     merged._updatedAt = Date.now();
@@ -2058,7 +2116,7 @@ var Settings = (function() {
   }
   function getExtraProfit(month) {
     var s = get();
-    return (s.extraProports || {})[month] || 0;
+    return (s.extraProfits || {})[month] || 0;
   }
   function getTicketPrices() {
     var s = get();
@@ -2973,7 +3031,7 @@ var OverviewPage = (function() {
     var agents = Agents.getAll();
     var shareholders = Shareholders.getAll();
     var allMtxs = MemberTxs.getAll();
-    var currentMonth = new Date().toISOString().slice(0, 7);
+    var currentMonth = currentMonthStr();
     /* KPI 與圖表口徑一致：本月 + 排除封存團（含 tripId 為空的 Bot 訂房代理反查） */
     var mtxs = filterActiveBookings(allMtxs, trips).filter(function(t) {
       return t.date && t.date.substring(0, 7) === currentMonth;
@@ -3404,8 +3462,8 @@ var PendingPage = (function() {
     var mtxs = MemberTxs.getByTrip(trip.id);
     var supplements = Supplements.getByTrip(trip.id);
 
-    // 訂房查詢：與代理面板(calcAgentQuota)口徑一致，按代理匹配而非僅靠 tripId
-    // 原因：Bot 建立訂房時可能選「不選團」導致 tripId 為空，getByTrip 會漏算
+    // 訂房查詢：有 tripId 的訂房只歸屬自己的團；無 tripId（Bot 建房未選團）按代理＋
+    // 入住日落於團期間（startDate ~ endDate）歸屬，避免同代理多團重複計入
     var allBookings = Bookings.getAll();
     var tripAgentIds = {};
     mtxs.forEach(function(tx) {
@@ -3414,12 +3472,14 @@ var PendingPage = (function() {
     });
     if (trip.agentId) tripAgentIds[trip.agentId] = true;
     var bookings = allBookings.filter(function(b) {
+      if (b.tripId) return b.tripId === trip.id;
       var bAgentId = b.agentId;
-      if (!bAgentId && b.tripId && typeof Trips !== 'undefined') {
-        var tr = Trips.getById(b.tripId);
-        bAgentId = tr ? (tr.agentId || '') : '';
-      }
-      return bAgentId && tripAgentIds[bAgentId];
+      if (!bAgentId || !tripAgentIds[bAgentId]) return false;
+      var ci = b.checkIn || '';
+      if (!ci) return false;
+      if (trip.startDate && ci < trip.startDate) return false;
+      if (trip.endDate && ci > trip.endDate) return false;
+      return true;
     });
 
     var totalWash = mtxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
@@ -4230,7 +4290,7 @@ var MemberPage = (function() {
       agentId: trip.agentId || m.agentId,
       shareholderId: m.shareholderId || trip.shareholderId,
       vipHallId: document.getElementById('tx-hall').value,
-      date: new Date().toISOString().slice(0, 10),
+      date: todayStr(),
       outCode: parseFloat(document.getElementById('tx-out').value) || 0,
       backCode: parseFloat(document.getElementById('tx-back').value) || 0,
       washCode: parseFloat(document.getElementById('tx-wash').value) || 0,
@@ -4322,7 +4382,7 @@ var MemberPage = (function() {
 
   function markPending(tripId) {
     Modal.confirm('確定要將團 ' + tripId + ' 送入待結帳？\n送入後此團將無法再新增/修改帳務，需至「待結帳」頁面進行封存。', function() {
-      Trips.update(tripId, { status: TRIP_STATUS.PENDING_SETTLEMENT, lastSettlementDate: new Date().toISOString().slice(0, 10) });
+      Trips.update(tripId, { status: TRIP_STATUS.PENDING_SETTLEMENT, lastSettlementDate: todayStr() });
       Toast.success('團 ' + tripId + ' 已送入待結帳');
       _selectedTrip = null;
       render();
@@ -4389,6 +4449,7 @@ var RoomPage = (function() {
     var totalThreshold = 0;
     var freeCount = 0;
     var paidCount = 0;
+    var discountCount = 0;
     var statusCounts = { 'pending': 0, 'confirmed': 0, 'checked-in': 0, 'checked-out': 0, 'cancelled': 0 };
 
     displayBookings.forEach(function(b) {
@@ -4397,6 +4458,7 @@ var RoomPage = (function() {
       totalThreshold += (b.threshold || 0) * n;
       if (b.feeType === 'free') freeCount++;
       if (b.feeType === 'paid') paidCount++;
+      if (b.feeType === 'discount') discountCount++;
       if (statusCounts[b.status] !== undefined) statusCounts[b.status]++;
     });
 
@@ -4432,6 +4494,7 @@ var RoomPage = (function() {
     html += kpiCard('總門檻(萬)', formatNum(totalThreshold / 10000), 'highlight', ICONS.threshold);
     html += kpiCard('免費房', freeCount, 'normal', ICONS.free);
     html += kpiCard('收費房', paidCount, 'warning', ICONS.paid);
+    html += kpiCard('折扣房', discountCount, 'normal', ICONS.paid);
     html += '</div>';
 
     /* === 費用公式提示（僅展開面板時顯示）=== */
@@ -4954,7 +5017,7 @@ var RoomPage = (function() {
       remaining = n - discount;
     }
 
-    /* feeType 判定（手動覆蓋優先） */
+    /* feeType 判定（手動覆蓋優先；折扣=有殘餘才收，金額乘折扣率） */
     var isPaid = false;
     if (b.feeType === FEE_TYPE.PAID) { isPaid = true; }
     else if (b.feeType === FEE_TYPE.FREE) { isPaid = false; }
@@ -4968,6 +5031,10 @@ var RoomPage = (function() {
       } else if (th > 0) {
         /* forced paid 但 remaining=0（如總盤制達標時手動改收費）→ 全天數計費 */
         charge = Math.round((n * th / 100000) * roomFeeRate);
+      }
+      /* 折扣：自動計算金額 × 折扣率（手動 chargeGuest 仍為最終覆蓋） */
+      if (b.feeType === FEE_TYPE.DISCOUNT && b.discountRate) {
+        charge = Math.round(charge * b.discountRate);
       }
       if (b.chargeGuest && b.chargeGuest > 0) charge = b.chargeGuest;
     }
@@ -5452,9 +5519,14 @@ var FeesPage = (function() {
       if (b.feeType === FEE_TYPE.PAID) { isPaid = true; }
       else if (b.feeType === FEE_TYPE.FREE) { isPaid = false; }
       else if (b.feeType === FEE_TYPE.AUTO) { isPaid = remaining > 0; }
+      else if (b.feeType === FEE_TYPE.DISCOUNT) { isPaid = remaining > 0; }
       var charge = 0;
       if (isPaid && remaining > 0 && th > 0) {
         charge = Math.round((remaining * th / 100000) * roomFeeRate);
+        /* 折扣：自動計算金額 × 折扣率（手動 chargeGuest 仍為最終覆蓋） */
+        if (b.feeType === FEE_TYPE.DISCOUNT && b.discountRate) {
+          charge = Math.round(charge * b.discountRate);
+        }
         charge = b.chargeGuest || charge;
       }
 
@@ -5537,8 +5609,8 @@ var FeesPage = (function() {
         html += '<td class="num">' + (d.discount > 0 ? d.discount : '<span style="color:var(--text-muted);">0</span>') + '</td>';
         html += '<td class="num">' + (d.remaining <= 0 ? '<span style="color:var(--success);font-weight:700;">達標</span>' : '<span style="color:var(--danger);font-weight:700;">' + d.remaining + '</span>') + '</td>';
         var ft = b.feeType || 'auto';
-        var ftLabel = { auto: '自動', free: '免費', paid: '收費' }[ft] || '自動';
-        var ftColor = { auto: 'var(--info)', free: 'var(--success)', paid: 'var(--danger)' }[ft] || 'var(--info)';
+        var ftLabel = { auto: '自動', free: '免費', paid: '收費', discount: '折扣' + (b.discountRate ? (b.discountRate * 10).toFixed(1).replace(/\.0$/, '') + '折' : '') }[ft] || '自動';
+        var ftColor = { auto: 'var(--info)', free: 'var(--success)', paid: 'var(--danger)', discount: 'var(--warning)' }[ft] || 'var(--info)';
         html += '<td>';
         html += '<span class="badge" style="background:' + ftColor + ';color:#fff;cursor:pointer;user-select:none;" onclick="FeesPage.toggleFeeType(\'' + b.id + '\')" title="點擊切換費用類型">' + ftLabel + '</span>';
         html += '</td>';
@@ -6009,13 +6081,19 @@ var AgentPage = (function() {
     } else {
       agents.forEach(function(agent) {
         var sh = Shareholders.getById(agent.shareholderId);
+        /* 與 calcAgentQuota 同口徑：排除封存團（無 tripId 的 Bot 資料保留） */
+        function notSealed(t) {
+          if (!t.tripId) return true;
+          var trip = Trips.getById(t.tripId);
+          return !trip || trip.status !== TRIP_STATUS.SEALED;
+        }
         var agentTxs = mtxs.filter(function(t) {
           var effectiveAgentId = t.agentId;
           if (!effectiveAgentId && t.tripId) {
             var trip = Trips.getById(t.tripId);
             effectiveAgentId = trip ? (trip.agentId || '') : '';
           }
-          return effectiveAgentId === agent.id;
+          return effectiveAgentId === agent.id && notSealed(t);
         });
         var agentBookings = bookings.filter(function(b) {
           var effectiveAgentId = b.agentId;
@@ -6023,7 +6101,7 @@ var AgentPage = (function() {
             var trip = Trips.getById(b.tripId);
             effectiveAgentId = trip ? (trip.agentId || '') : '';
           }
-          return effectiveAgentId === agent.id;
+          return effectiveAgentId === agent.id && notSealed(b);
         });
         var quota = calcAgentQuota(agent.id, mtxs, bookings);
         var totalSettle = agentTxs.reduce(function(s, t) { return s + (t.totalSettlement || 0); }, 0);
@@ -6435,7 +6513,7 @@ var ShareholderPage = (function() {
     var mtxs = MemberTxs.getAll();
     var settings = Settings.get();
     var halls = Settings.getVipHalls();
-    _currentMonth = new Date().toISOString().slice(0, 7);
+    _currentMonth = currentMonthStr();
 
     // 當月交易
     var monthTxs = mtxs.filter(function(t) {
@@ -7376,7 +7454,7 @@ var HistoryPage = (function() {
     if (container) container.innerHTML = html;
   }
 
-  // 統一的訂房查詢（與 pending.js 一致，按代理匹配）
+  // 統一的訂房查詢：有 tripId 只歸自己的團；無 tripId（Bot 建房）按代理＋入住日落於團期間歸屬
   function getTripBookings(trip) {
     var mtxs = MemberTxs.getByTrip(trip.id);
     var allBookings = Bookings.getAll();
@@ -7387,12 +7465,14 @@ var HistoryPage = (function() {
     });
     if (trip.agentId) tripAgentIds[trip.agentId] = true;
     return allBookings.filter(function(b) {
+      if (b.tripId) return b.tripId === trip.id;
       var bAgentId = b.agentId;
-      if (!bAgentId && b.tripId && typeof Trips !== 'undefined') {
-        var tr = Trips.getById(b.tripId);
-        bAgentId = tr ? (tr.agentId || '') : '';
-      }
-      return bAgentId && tripAgentIds[bAgentId];
+      if (!bAgentId || !tripAgentIds[bAgentId]) return false;
+      var ci = b.checkIn || '';
+      if (!ci) return false;
+      if (trip.startDate && ci < trip.startDate) return false;
+      if (trip.endDate && ci > trip.endDate) return false;
+      return true;
     });
   }
 
@@ -7406,7 +7486,7 @@ var HistoryPage = (function() {
     var totalSettle = mtxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
     var roomNights = bookings.reduce(function(s, b) { return s + (b.nights || 1); }, 0);
     var memberCount = Object.keys(mtxs.reduce(function(acc, tx) { acc[tx.memberId] = true; return acc; }, {})).length;
-    var sealedDate = trip.sealedAt ? new Date(trip.sealedAt).toISOString().slice(0, 10) : (trip.endDate || '-');
+    var sealedDate = trip.sealedAt ? dateStrFromTs(trip.sealedAt) : (trip.endDate || '-');
 
     var isExpanded = _expandedTrips[trip.id];
 
@@ -7619,7 +7699,7 @@ var SettingsPage = (function() {
     var html = '';
 
     // 月汇率
-    var currentMonth = new Date().toISOString().slice(0, 7);
+    var currentMonth = currentMonthStr();
     var monthlyRate = Settings.getMonthlyRate(currentMonth);
     html += '<div class="card">';
     html += '<div class="card-header"><h3>月匯率設定</h3></div>';
@@ -7722,13 +7802,18 @@ var SettingsPage = (function() {
     var month = document.getElementById('set-month').value;
     var rate = parseFloat(document.getElementById('set-rate').value);
     var shRate = parseFloat(document.getElementById('set-sh-rate').value);
+    if (!month) { Toast.error('請選擇月份'); return; }
+    if (isNaN(rate) || rate <= 0) { Toast.error('匯率須為正數'); return; }
+    if (isNaN(shRate) || shRate <= 0) { Toast.error('股東分潤匯率須為正數'); return; }
     Settings.setMonthlyRate(month, { exchangeRate: rate, shareholderRate: shRate });
     Toast.success('匯率已儲存');
   }
 
   function updateHall(idx, field, value) {
     var halls = Settings.getVipHalls();
-    halls[idx][field] = parseFloat(value);
+    var val = parseFloat(value);
+    if (isNaN(val) || val < 0) { Toast.error('數值無效，已還原'); render(); return; }
+    halls[idx][field] = val;
     Settings.updateVipHalls(halls);
     Toast.success('費率已更新');
   }
@@ -7736,11 +7821,11 @@ var SettingsPage = (function() {
   function changePwd() {
     var pwd = document.getElementById('set-new-pwd').value;
     if (!pwd || pwd.length < 4) { Toast.error('密碼至少4位'); return; }
-    Auth.verify(pwd).then(function() {
-      // 用 SHA-256 hash 更新
-      Auth.sha256(pwd).then(function(hash) {
-        APP.PWD_HASH = hash;
-        Toast.success('密碼已更新');
+    /* 直接对新密码做 hash 并持久化（旧实现误用 Auth.verify 比对旧 hash，永远失败且不存盘） */
+    Auth.sha256(pwd).then(function(hash) {
+      Auth.setPwdHash(hash).then(function() {
+        document.getElementById('set-new-pwd').value = '';
+        Toast.success('密碼已更新，下次登入請使用新密碼');
       });
     });
   }
@@ -7748,6 +7833,7 @@ var SettingsPage = (function() {
   function updateTicket(category, idx, field, value) {
     var tp = Settings.getTicketPrices();
     var val = parseFloat(value);
+    if (isNaN(val) || val < 0) { Toast.error('數值無效，已還原'); render(); return; }
     if (category === 'waterDance') {
       tp.waterDance[idx][field] = val;
     } else {
