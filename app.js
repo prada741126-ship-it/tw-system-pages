@@ -50,6 +50,9 @@ var STORAGE_KEYS = {
   VIP_HALLS:         'tw1_vip_halls',
   HOTEL_CONFIG:      'tw1_hotel_config',
   EMPLOYEE_LIST:     'tw1_employee_list',
+  WALLET_TXS:        'tw1_wallet_txs',
+  LOANS:             'tw1_loans',
+  PENDING_EXPS:      'tw1_pending_exps',
   AUTH:              'tw1_auth',
   PWD_HASH:          'tw1_pwd_hash',
   LAST_SYNC_TIME:    'tw1_last_sync_time',
@@ -96,6 +99,9 @@ var FB_PATH = {
   EMPLOYEE_LIST:  'taiwan_data/employeeList',
   EXTRA_INCOME:   'taiwan_data/extraIncome',
   HOTEL_CONFIG:   'taiwan_data/hotelConfig',
+  WALLET_TXS:     'taiwan_data/walletTxs',
+  LOANS:          'taiwan_data/loans',
+  PENDING_EXPS:   'taiwan_data/pendingExps',
   CLEARED:        'taiwan_data/clearedAt',
   CONNECTED:      '.info/connected',
 };
@@ -131,6 +137,9 @@ var EVENTS = {
   SUPPLEMENT_CREATED:  'supplement:created',
   SUPPLEMENT_UPDATED:  'supplement:updated',
   SUPPLEMENT_DELETED:  'supplement:deleted',
+  WALLET_TXS_LOADED:   'walletTxs:loaded',
+  LOANS_LOADED:        'loans:loaded',
+  PENDING_EXPS_LOADED: 'pendingExps:loaded',
   SETTINGS_UPDATED:  'settings:updated',
   SETTINGS_LOADED:   'settings:loaded',
   HOTEL_CONFIG_LOADED:  'hotelConfig:loaded',
@@ -220,6 +229,7 @@ var PAGES = [
   { id: 'page-shareholder', name: 'shareholder', label: '股東分潤',   icon: '\uD83D\uDCB0', shortcut: '5' },
   { id: 'page-members-mgmt',name: 'membersMgmt', label: '會員管理',   icon: '\u2699\uFE0F', shortcut: '6' },
   { id: 'page-history',     name: 'history',     label: '歷史查詢',   icon: '\uD83D\uDD0D', shortcut: '7' },
+  { id: 'page-wallet',      name: 'wallet',      label: '錢包流水',   icon: '\uD83D\uDCB5', shortcut: '8' },
   { id: 'page-settings',    name: 'settings',    label: '系統設定',   icon: '\u2699\uFE0F', shortcut: '0' },
 ];
 
@@ -234,6 +244,7 @@ var SHORTCUTS = [
   { keys: 'Ctrl+5', desc: '股東分潤' },
   { keys: 'Ctrl+6', desc: '會員管理' },
   { keys: 'Ctrl+7', desc: '歷史查詢' },
+  { keys: 'Ctrl+8', desc: '錢包流水' },
   { keys: 'Ctrl+0', desc: '系統設定' },
   { keys: 'Escape', desc: '關閉彈窗' },
 ];
@@ -404,6 +415,9 @@ var State = (function() {
     archives: [],
     closedMonths: [],
     hotelConfig: [],
+    walletTxs: [],
+    loans: [],
+    pendingExps: [],
     currentPage: 'overview',
     connected: false,
     syncing: false,
@@ -1324,6 +1338,9 @@ function _setupWatchers() {
     { key: 'SETTINGS',      storeKey: STORAGE_KEYS.SETTINGS,      event: EVENTS.SETTINGS_LOADED,      stateKey: 'settings' },
     { key: 'EXTRA_INCOME',  storeKey: STORAGE_KEYS.EXTRA_INCOME,  event: EVENTS.SYNC_COMPLETE,        stateKey: 'extraIncome' },
     { key: 'HOTEL_CONFIG',  storeKey: STORAGE_KEYS.HOTEL_CONFIG,  event: EVENTS.HOTEL_CONFIG_LOADED,  stateKey: 'hotelConfig' },
+    { key: 'WALLET_TXS',   storeKey: STORAGE_KEYS.WALLET_TXS,   event: EVENTS.WALLET_TXS_LOADED,     stateKey: 'walletTxs' },
+    { key: 'LOANS',        storeKey: STORAGE_KEYS.LOANS,         event: EVENTS.LOANS_LOADED,          stateKey: 'loans' },
+    { key: 'PENDING_EXPS', storeKey: STORAGE_KEYS.PENDING_EXPS,  event: EVENTS.PENDING_EXPS_LOADED,   stateKey: 'pendingExps' },
   ];
 
   watchList.forEach(function(w) {
@@ -1418,7 +1435,7 @@ function _resyncAll() {
     FB_PATH.MEMBERS, FB_PATH.AGENTS, FB_PATH.SHAREHOLDERS,
     FB_PATH.TRIPS, FB_PATH.MEMBER_TXS, FB_PATH.BOOKINGS,
     FB_PATH.SUPPLEMENTS, FB_PATH.SETTINGS, FB_PATH.EXTRA_INCOME,
-    FB_PATH.HOTEL_CONFIG,
+    FB_PATH.HOTEL_CONFIG, FB_PATH.WALLET_TXS, FB_PATH.LOANS, FB_PATH.PENDING_EXPS,
   ];
   var storeMap = {
     'taiwan_data/members':       { storeKey: STORAGE_KEYS.MEMBERS,       event: EVENTS.MEMBERS_LOADED,       stateKey: 'members' },
@@ -1431,6 +1448,9 @@ function _resyncAll() {
     'taiwan_data/settings':      { storeKey: STORAGE_KEYS.SETTINGS,      event: EVENTS.SETTINGS_LOADED,      stateKey: 'settings' },
     'taiwan_data/extraIncome':   { storeKey: STORAGE_KEYS.EXTRA_INCOME,  event: EVENTS.SYNC_COMPLETE,        stateKey: 'extraIncome' },
     'taiwan_data/hotelConfig':   { storeKey: STORAGE_KEYS.HOTEL_CONFIG,  event: EVENTS.HOTEL_CONFIG_LOADED,  stateKey: 'hotelConfig' },
+    'taiwan_data/walletTxs':     { storeKey: STORAGE_KEYS.WALLET_TXS,    event: EVENTS.WALLET_TXS_LOADED,     stateKey: 'walletTxs' },
+    'taiwan_data/loans':         { storeKey: STORAGE_KEYS.LOANS,         event: EVENTS.LOANS_LOADED,          stateKey: 'loans' },
+    'taiwan_data/pendingExps':   { storeKey: STORAGE_KEYS.PENDING_EXPS,  event: EVENTS.PENDING_EXPS_LOADED,   stateKey: 'pendingExps' },
   };
 
   syncPaths.forEach(function(path) {
@@ -7688,6 +7708,229 @@ var HistoryPage = (function() {
 })();
 
 
+// === src/pages/wallet.js ===
+/**
+ * pages/wallet.js — 錢包流水頁（唯讀，供會計核對）
+ * 顯示 APP 端產生的三類資料：
+ * 1. 港幣現鈔錢包流水 (walletTxs)
+ * 2. 港幣借支 (loans)
+ * 3. 預支開銷 (pendingExps)
+ */
+var WalletPage = (function() {
+  var _tab = 'wallet';
+
+  function fmtHK(n) {
+    var v = Math.round(n || 0);
+    return (v >= 0 ? '' : '-') + Math.abs(v).toLocaleString();
+  }
+
+  function escHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function typeName(t) {
+    var labels = {
+      'opening': '開帳', 'deposit': '補登', 'loan': '借支登記',
+      'repay': '借支回收', 'payout': '開銷墊付', 'adjust': '調整',
+    };
+    return labels[t] || t || '';
+  }
+
+  function memberName(id) {
+    if (!id) return '';
+    var m = (State.get('members') || []).find(function(m) { return m.id === id; });
+    return m ? (m.name || m.id) : id;
+  }
+
+  function tripLabel(id) {
+    if (!id) return '';
+    var t = (State.get('trips') || []).find(function(t) { return t.id === id; });
+    if (!t) return id;
+    return t.label ? (t.id + ' ' + t.label) : t.id;
+  }
+
+  function render() {
+    var html = '<div class="card">';
+    html += '<div class="card-header"><h3>錢包流水（會計核對）</h3></div>';
+
+    /* 分頁切換 */
+    html += '<div class="filter-bar" style="margin-bottom:12px;">';
+    html += '<button class="filter-btn' + (_tab === 'wallet' ? ' active' : '') + '" onclick="WalletPage._tab(\'wallet\')">錢包流水</button>';
+    html += '<button class="filter-btn' + (_tab === 'loans' ? ' active' : '') + '" onclick="WalletPage._tab(\'loans\')">借支</button>';
+    html += '<button class="filter-btn' + (_tab === 'pendExps' ? ' active' : '') + '" onclick="WalletPage._tab(\'pendExps\')">預支開銷</button>';
+    html += '</div>';
+
+    if (_tab === 'wallet') html += _renderWallet();
+    else if (_tab === 'loans') html += _renderLoans();
+    else html += _renderPendExps();
+
+    html += '</div>';
+
+    var container = document.getElementById('page-wallet');
+    if (container) container.innerHTML = html;
+  }
+
+  function _renderWallet() {
+    var txs = (State.get('walletTxs') || []).filter(function(w) { return !w._deleted; });
+    txs.sort(function(a, b) { return (b.date || '').localeCompare(a.date || '') || (b._updatedAt || 0) - (a._updatedAt || 0); });
+
+    var balance = txs.reduce(function(s, w) { return s + (w.amountHKD || 0); }, 0);
+    var inflow = txs.filter(function(w) { return (w.amountHKD || 0) > 0; }).reduce(function(s, w) { return s + w.amountHKD; }, 0);
+    var outflow = txs.filter(function(w) { return (w.amountHKD || 0) < 0; }).reduce(function(s, w) { return s + Math.abs(w.amountHKD); }, 0);
+
+    var html = '';
+
+    /* 餘額摘要 */
+    html += '<div class="kpi-grid" style="margin-bottom:16px;">';
+    html += '<div class="kpi-card highlight"><div class="kpi-label">錢包餘額(HK$)</div><div class="kpi-value">' + fmtHK(balance) + '</div></div>';
+    html += '<div class="kpi-card normal"><div class="kpi-label">流入合計</div><div class="kpi-value" style="color:var(--success);">' + fmtHK(inflow) + '</div></div>';
+    html += '<div class="kpi-card normal"><div class="kpi-label">流出合計</div><div class="kpi-value" style="color:var(--danger);">' + fmtHK(outflow) + '</div></div>';
+    html += '<div class="kpi-card normal"><div class="kpi-label">流水筆數</div><div class="kpi-value">' + txs.length + '</div></div>';
+    html += '</div>';
+
+    if (txs.length === 0) {
+      html += '<div class="empty-state">無錢包流水記錄</div>';
+      return html;
+    }
+
+    html += '<div class="table-wrapper"><table class="data-table"><thead><tr>';
+    html += '<th>日期</th><th>類型</th><th class="num">金額(HK$)</th><th>會員</th><th>團</th><th>備註</th>';
+    html += '</tr></thead><tbody>';
+
+    txs.forEach(function(w) {
+      var amt = w.amountHKD || 0;
+      html += '<tr>';
+      html += '<td>' + escHtml(w.date || '') + '</td>';
+      html += '<td>' + escHtml(typeName(w.type)) + '</td>';
+      html += '<td class="num" style="' + (amt >= 0 ? 'color:var(--success)' : 'color:var(--danger)') + ';">' + fmtHK(amt) + '</td>';
+      html += '<td>' + escHtml(memberName(w.memberId)) + '</td>';
+      html += '<td>' + escHtml(tripLabel(w.tripId)) + '</td>';
+      html += '<td>' + escHtml(w.note || '') + '</td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  function _renderLoans() {
+    var loans = (State.get('loans') || []).filter(function(l) { return !l._deleted; });
+    loans.sort(function(a, b) { return (b.date || '').localeCompare(a.date || '') || (b._updatedAt || 0) - (a._updatedAt || 0); });
+
+    var totalLent = loans.reduce(function(s, l) { return s + (l.amountHKD || 0); }, 0);
+    var totalRepaid = loans.reduce(function(s, l) {
+      return s + (l.repayments || []).reduce(function(rs, r) { return rs + (r.amountHKD || 0); }, 0);
+    }, 0);
+
+    var html = '';
+
+    html += '<div class="kpi-grid" style="margin-bottom:16px;">';
+    html += '<div class="kpi-card highlight"><div class="kpi-label">未回收合計(HK$)</div><div class="kpi-value">' + fmtHK(totalLent - totalRepaid) + '</div></div>';
+    html += '<div class="kpi-card normal"><div class="kpi-label">借出合計</div><div class="kpi-value">' + fmtHK(totalLent) + '</div></div>';
+    html += '<div class="kpi-card normal"><div class="kpi-label">已回收合計</div><div class="kpi-value" style="color:var(--success);">' + fmtHK(totalRepaid) + '</div></div>';
+    html += '<div class="kpi-card normal"><div class="kpi-label">借支筆數</div><div class="kpi-value">' + loans.length + '</div></div>';
+    html += '</div>';
+
+    if (loans.length === 0) {
+      html += '<div class="empty-state">無借支記錄</div>';
+      return html;
+    }
+
+    html += '<div class="table-wrapper"><table class="data-table"><thead><tr>';
+    html += '<th>日期</th><th>會員</th><th class="num">借支金額</th><th class="num">已回收</th><th class="num">未回收</th><th>回收明細</th><th>備註</th>';
+    html += '</tr></thead><tbody>';
+
+    loans.forEach(function(l) {
+      var lent = l.amountHKD || 0;
+      var repaid = (l.repayments || []).reduce(function(s, r) { return s + (r.amountHKD || 0); }, 0);
+      var outstanding = lent - repaid;
+      var repayDetail = (l.repayments || []).map(function(r) {
+        return (r.date || '') + ': ' + fmtHK(r.amountHKD) + (r.note ? ' (' + r.note + ')' : '');
+      }).join('; ');
+
+      html += '<tr>';
+      html += '<td>' + escHtml(l.date || '') + '</td>';
+      html += '<td>' + escHtml(memberName(l.memberId)) + '</td>';
+      html += '<td class="num">' + fmtHK(lent) + '</td>';
+      html += '<td class="num" style="color:var(--success);">' + fmtHK(repaid) + '</td>';
+      html += '<td class="num" style="' + (outstanding > 0 ? 'color:var(--danger);font-weight:600;' : '') + '">' + fmtHK(outstanding) + '</td>';
+      html += '<td style="font-size:var(--font-size-sm);">' + escHtml(repayDetail) + '</td>';
+      html += '<td>' + escHtml(l.note || '') + '</td>';
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  function _renderPendExps() {
+    var exps = (State.get('pendingExps') || []).filter(function(e) { return !e._deleted; });
+    exps.sort(function(a, b) { return (b.date || '').localeCompare(a.date || '') || (b._updatedAt || 0) - (a._updatedAt || 0); });
+
+    var totalRows = exps.reduce(function(s, e) { return s + (e.rows || []).length; }, 0);
+    var totalAmount = exps.reduce(function(s, e) {
+      return s + (e.rows || []).reduce(function(rs, r) { return rs + (r.amountHK || 0); }, 0);
+    }, 0);
+
+    var html = '';
+
+    html += '<div class="kpi-grid" style="margin-bottom:16px;">';
+    html += '<div class="kpi-card highlight"><div class="kpi-label">開銷合計(HK$)</div><div class="kpi-value">' + fmtHK(totalAmount) + '</div></div>';
+    html += '<div class="kpi-card normal"><div class="kpi-label">預支單數</div><div class="kpi-value">' + exps.length + '</div></div>';
+    html += '<div class="kpi-card normal"><div class="kpi-label">開銷筆數</div><div class="kpi-value">' + totalRows + '</div></div>';
+    html += '</div>';
+
+    if (exps.length === 0) {
+      html += '<div class="empty-state">無預支開銷記錄</div>';
+      return html;
+    }
+
+    exps.forEach(function(e) {
+      var rowsTotal = (e.rows || []).reduce(function(s, r) { return s + (r.amountHK || 0); }, 0);
+      html += '<div class="card" style="margin-bottom:8px;">';
+      html += '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">';
+      html += '<span>' + escHtml(e.date || '') + ' — ' + escHtml(tripLabel(e.tripId)) + '</span>';
+      html += '<span class="num" style="font-weight:600;">HK$ ' + fmtHK(rowsTotal) + '</span>';
+      html += '</div>';
+
+      if (e.rows && e.rows.length > 0) {
+        html += '<table class="data-table"><thead><tr>';
+        html += '<th>品名</th><th class="num">數量</th><th class="num">單價(HK$)</th><th class="num">小計(HK$)</th>';
+        html += '</tr></thead><tbody>';
+        e.rows.forEach(function(r) {
+          var qty = r.quantity || 1;
+          var unit = r.unitPrice || (qty > 0 ? (r.amountHK || 0) / qty : 0);
+          html += '<tr>';
+          html += '<td>' + escHtml(r.name || '') + '</td>';
+          html += '<td class="num">' + qty + '</td>';
+          html += '<td class="num">' + fmtHK(unit) + '</td>';
+          html += '<td class="num">' + fmtHK(r.amountHK || 0) + '</td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+      }
+
+      if (e.note) {
+        html += '<div style="padding:4px 12px;font-size:var(--font-size-sm);color:var(--text-muted);">備註：' + escHtml(e.note) + '</div>';
+      }
+      html += '</div>';
+    });
+
+    return html;
+  }
+
+  function setTab(tab) {
+    _tab = tab;
+    render();
+  }
+
+  return {
+    render: render,
+    _tab: setTab,
+  };
+})();
+
+
 // === src/pages/settings.js ===
 /**
  * pages/settings.js — 系统设定页
@@ -7980,6 +8223,7 @@ function exposeGlobals() {
   window.ShareholderPage = ShareholderPage;
   window.MembersMgmtPage = MembersMgmtPage;
   window.HistoryPage = HistoryPage;
+  window.WalletPage = WalletPage;
   window.SettingsPage = SettingsPage;
   // Calc (for debugging)
   window.calcMemberTx = calcMemberTx;
@@ -8008,6 +8252,7 @@ function onPageChange(pageName) {
     'shareholder': function() { ShareholderPage.render(); },
     'membersMgmt': function() { MembersMgmtPage.render(); },
     'history':     function() { HistoryPage.render(); },
+    'wallet':      function() { WalletPage.render(); },
     'settings':    function() { SettingsPage.render(); },
   };
   if (renderMap[pageName]) {
@@ -8026,6 +8271,10 @@ function loadAllData() {
   Settings.load();
   ExtraIncome.load();
   HotelConfig.load();
+  /* Wallet/Loans/PendExps: APP 端寫入的資料，Web 端唯讀載入供會計核對 */
+  State.set('walletTxs', Store.readArray(STORAGE_KEYS.WALLET_TXS));
+  State.set('loans', Store.readArray(STORAGE_KEYS.LOANS));
+  State.set('pendingExps', Store.readArray(STORAGE_KEYS.PENDING_EXPS));
   /* EMPLOYEE_LIST: 物件結構，直接從 localStorage 讀取 */
   State.set('employeeList', Store.read(STORAGE_KEYS.EMPLOYEE_LIST) || {});
   RecentlyDeleted.init();
