@@ -84,28 +84,30 @@ var FIREBASE_CDN = {
 };
 
 // ============================================================================
-// Firebase 路径 (taiwan_data/ 前缀)
+// Firebase 路径 (taiwan_data/pilot/ 前缀 — v1.3.0 與 APP 主導端同資料根)
 // ============================================================================
+var FB_DATA_ROOT = 'taiwan_data/pilot';
+
 var FB_PATH = {
-  MEMBERS:        'taiwan_data/members',
-  AGENTS:         'taiwan_data/agents',
-  SHAREHOLDERS:   'taiwan_data/shareholders',
-  TRIPS:          'taiwan_data/trips',
-  MEMBER_TXS:     'taiwan_data/memberTxs',
-  BOOKINGS:       'taiwan_data/bookings',
-  SUPPLEMENTS:    'taiwan_data/supplements',
-  ARCHIVES:       'taiwan_data/archives',
-  VIP_HALLS:      'taiwan_data/vipHalls',
-  SETTINGS:       'taiwan_data/settings',
-  CLOSED_MONTHS:  'taiwan_data/closedMonths',
-  EMPLOYEE_LIST:  'taiwan_data/employeeList',
-  EXTRA_INCOME:   'taiwan_data/extraIncome',
-  HOTEL_CONFIG:   'taiwan_data/hotelConfig',
-  WALLET_TXS:     'taiwan_data/walletTxs',
-  LOANS:          'taiwan_data/loans',
-  PENDING_EXPS:   'taiwan_data/pendingExps',
-  USERS:          'taiwan_data/users',
-  CLEARED:        'taiwan_data/clearedAt',
+  MEMBERS:        FB_DATA_ROOT + '/members',
+  AGENTS:         FB_DATA_ROOT + '/agents',
+  SHAREHOLDERS:   FB_DATA_ROOT + '/shareholders',
+  TRIPS:          FB_DATA_ROOT + '/trips',
+  MEMBER_TXS:     FB_DATA_ROOT + '/memberTxs',
+  BOOKINGS:       FB_DATA_ROOT + '/bookings',
+  SUPPLEMENTS:    FB_DATA_ROOT + '/supplements',
+  ARCHIVES:       FB_DATA_ROOT + '/archives',
+  VIP_HALLS:      FB_DATA_ROOT + '/vipHalls',
+  SETTINGS:       FB_DATA_ROOT + '/settings',
+  CLOSED_MONTHS:  FB_DATA_ROOT + '/closedMonths',
+  EMPLOYEE_LIST:  FB_DATA_ROOT + '/employeeList',
+  EXTRA_INCOME:   FB_DATA_ROOT + '/extraIncome',
+  HOTEL_CONFIG:   FB_DATA_ROOT + '/hotelConfig',
+  WALLET_TXS:     FB_DATA_ROOT + '/walletTxs',
+  LOANS:          FB_DATA_ROOT + '/loans',
+  PENDING_EXPS:   FB_DATA_ROOT + '/pendingExps',
+  USERS:          FB_DATA_ROOT + '/users',
+  CLEARED:        FB_DATA_ROOT + '/clearedAt',
   CONNECTED:      '.info/connected',
 };
 
@@ -1632,21 +1634,20 @@ function _resyncAll() {
     FB_PATH.SUPPLEMENTS, FB_PATH.SETTINGS, FB_PATH.EXTRA_INCOME,
     FB_PATH.HOTEL_CONFIG, FB_PATH.WALLET_TXS, FB_PATH.LOANS, FB_PATH.PENDING_EXPS,
   ];
-  var storeMap = {
-    'taiwan_data/members':       { storeKey: STORAGE_KEYS.MEMBERS,       event: EVENTS.MEMBERS_LOADED,       stateKey: 'members' },
-    'taiwan_data/agents':        { storeKey: STORAGE_KEYS.AGENTS,        event: EVENTS.AGENTS_LOADED,        stateKey: 'agents' },
-    'taiwan_data/shareholders':  { storeKey: STORAGE_KEYS.SHAREHOLDERS,  event: EVENTS.SHAREHOLDERS_LOADED,  stateKey: 'shareholders' },
-    'taiwan_data/trips':         { storeKey: STORAGE_KEYS.TRIPS,         event: EVENTS.TRIPS_LOADED,         stateKey: 'trips' },
-    'taiwan_data/memberTxs':     { storeKey: STORAGE_KEYS.MEMBER_TXS,    event: EVENTS.MTX_LOADED,           stateKey: 'memberTxs' },
-    'taiwan_data/bookings':      { storeKey: STORAGE_KEYS.BOOKINGS,      event: EVENTS.BOOKINGS_LOADED,      stateKey: 'bookings' },
-    'taiwan_data/supplements':   { storeKey: STORAGE_KEYS.SUPPLEMENTS,   event: EVENTS.SYNC_COMPLETE,        stateKey: 'supplements' },
-    'taiwan_data/settings':      { storeKey: STORAGE_KEYS.SETTINGS,      event: EVENTS.SETTINGS_LOADED,      stateKey: 'settings' },
-    'taiwan_data/extraIncome':   { storeKey: STORAGE_KEYS.EXTRA_INCOME,  event: EVENTS.SYNC_COMPLETE,        stateKey: 'extraIncome' },
-    'taiwan_data/hotelConfig':   { storeKey: STORAGE_KEYS.HOTEL_CONFIG,  event: EVENTS.HOTEL_CONFIG_LOADED,  stateKey: 'hotelConfig' },
-    'taiwan_data/walletTxs':     { storeKey: STORAGE_KEYS.WALLET_TXS,    event: EVENTS.WALLET_TXS_LOADED,     stateKey: 'walletTxs' },
-    'taiwan_data/loans':         { storeKey: STORAGE_KEYS.LOANS,         event: EVENTS.LOANS_LOADED,          stateKey: 'loans' },
-    'taiwan_data/pendingExps':   { storeKey: STORAGE_KEYS.PENDING_EXPS,  event: EVENTS.PENDING_EXPS_LOADED,   stateKey: 'pendingExps' },
-  };
+  var storeMap = {};
+  storeMap[FB_PATH.MEMBERS]       = { storeKey: STORAGE_KEYS.MEMBERS,       event: EVENTS.MEMBERS_LOADED,       stateKey: 'members' };
+  storeMap[FB_PATH.AGENTS]        = { storeKey: STORAGE_KEYS.AGENTS,        event: EVENTS.AGENTS_LOADED,        stateKey: 'agents' };
+  storeMap[FB_PATH.SHAREHOLDERS]  = { storeKey: STORAGE_KEYS.SHAREHOLDERS,  event: EVENTS.SHAREHOLDERS_LOADED,  stateKey: 'shareholders' };
+  storeMap[FB_PATH.TRIPS]         = { storeKey: STORAGE_KEYS.TRIPS,         event: EVENTS.TRIPS_LOADED,         stateKey: 'trips' };
+  storeMap[FB_PATH.MEMBER_TXS]    = { storeKey: STORAGE_KEYS.MEMBER_TXS,    event: EVENTS.MTX_LOADED,           stateKey: 'memberTxs' };
+  storeMap[FB_PATH.BOOKINGS]      = { storeKey: STORAGE_KEYS.BOOKINGS,      event: EVENTS.BOOKINGS_LOADED,      stateKey: 'bookings' };
+  storeMap[FB_PATH.SUPPLEMENTS]   = { storeKey: STORAGE_KEYS.SUPPLEMENTS,   event: EVENTS.SYNC_COMPLETE,        stateKey: 'supplements' };
+  storeMap[FB_PATH.SETTINGS]      = { storeKey: STORAGE_KEYS.SETTINGS,      event: EVENTS.SETTINGS_LOADED,      stateKey: 'settings' };
+  storeMap[FB_PATH.EXTRA_INCOME]  = { storeKey: STORAGE_KEYS.EXTRA_INCOME,  event: EVENTS.SYNC_COMPLETE,        stateKey: 'extraIncome' };
+  storeMap[FB_PATH.HOTEL_CONFIG]  = { storeKey: STORAGE_KEYS.HOTEL_CONFIG,  event: EVENTS.HOTEL_CONFIG_LOADED,  stateKey: 'hotelConfig' };
+  storeMap[FB_PATH.WALLET_TXS]    = { storeKey: STORAGE_KEYS.WALLET_TXS,    event: EVENTS.WALLET_TXS_LOADED,     stateKey: 'walletTxs' };
+  storeMap[FB_PATH.LOANS]         = { storeKey: STORAGE_KEYS.LOANS,         event: EVENTS.LOANS_LOADED,          stateKey: 'loans' };
+  storeMap[FB_PATH.PENDING_EXPS]  = { storeKey: STORAGE_KEYS.PENDING_EXPS,  event: EVENTS.PENDING_EXPS_LOADED,   stateKey: 'pendingExps' };
 
   syncPaths.forEach(function(path) {
     var cfg = storeMap[path];
@@ -8463,6 +8464,21 @@ function onPageChange(pageName) {
 }
 
 function loadAllData() {
+  /* v1.3.0 資料根切換（taiwan_data → taiwan_data/pilot）：一次性清除舊根本機快取，
+     避免舊頂層歷史資料經 mergeArray 混入新根（帳號/密碼快取保留） */
+  try {
+    if (localStorage.getItem('tw1_data_root') !== 'pilot') {
+      ['MEMBERS','AGENTS','SHAREHOLDERS','TRIPS','MEMBER_TXS','BOOKINGS','SUPPLEMENTS',
+       'ARCHIVES','CLOSED_MONTHS','VIP_HALLS','SETTINGS','EXTRA_INCOME','HOTEL_CONFIG',
+       'EMPLOYEE_LIST','WALLET_TXS','LOANS','PENDING_EXPS','USERS','LAST_SYNC_TIME',
+       'RECENTLY_DELETED'].forEach(function(k) {
+        if (STORAGE_KEYS[k]) localStorage.removeItem(STORAGE_KEYS[k]);
+      });
+      localStorage.setItem('tw1_data_root', 'pilot');
+      console.log('[App] 資料根已切換至 taiwan_data/pilot，舊快取已清除');
+    }
+  } catch(e) { console.error('[App] data root migration', e); }
+
   Members.load();
   Agents.load();
   Shareholders.load();
