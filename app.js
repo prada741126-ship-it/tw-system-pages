@@ -2150,6 +2150,7 @@ var Trips = (function() {
       lastSettlementDate: null,
       sealedAt: null,
       sealedMonth: null,
+      label: data.label || '', // v2.1 團備註名稱（與 APP 一致：同上級多團並行時區分）
       notes: data.notes || '',
       createdAt: now,
       _fbKey: 'trip_T' + dateStr + seq,
@@ -2197,7 +2198,13 @@ var Trips = (function() {
     enqueue(FB_PATH.TRIPS, obj);
     EventBus.emit(EVENTS.TRIP_UPDATED, arr[idx]);
   }
-  return { load: load, save: save, getAll: getAll, getById: getById, getActiveByShareholder: getActiveByShareholder, create: create, update: update, sealTrip: sealTrip, remove: remove };
+  /* v2.1 顯示名稱（與 APP 一致）：T20260823 · 猴哥團東哥（無備註只顯示 ID） */
+  function displayName(tripOrId) {
+    var t = typeof tripOrId === 'string' ? getById(tripOrId) : tripOrId;
+    if (!t) return typeof tripOrId === 'string' ? tripOrId : '';
+    return t.label ? (t.id + ' · ' + t.label) : t.id;
+  }
+  return { load: load, save: save, getAll: getAll, getById: getById, getActiveByShareholder: getActiveByShareholder, create: create, update: update, sealTrip: sealTrip, remove: remove, displayName: displayName };
 })();
 
 
@@ -4288,6 +4295,11 @@ var PdfExport = (function() {
  * 8张KPI卡片 + 活跃团 + 待结帐警示 + 建团Modal
  */
 var OverviewPage = (function() {
+  function escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
   var ICONS = {
     active: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>',
     warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
@@ -4449,7 +4461,7 @@ var OverviewPage = (function() {
           return h ? h.name : hid;
         }).join(', ');
         html += '<tr>';
-        html += '<td><span class="ov-trip-id">' + trip.id + '</span></td>';
+        html += '<td><span class="ov-trip-id">' + escHtml(trip.id) + '</span>' + (trip.label ? ' <span style="color:var(--text-muted);font-size:12px;">' + escHtml(trip.label) + '</span>' : '') + '</td>';
         html += '<td>' + (sh ? sh.name : (trip.shareholderId || '—')) + '</td>';
         html += '<td>' + (ag ? ag.name : '—') + '</td>';
         html += '<td><span class="ov-hall-badge">' + hallName + '</span></td>';
@@ -4483,7 +4495,7 @@ var OverviewPage = (function() {
       pendingTrips.forEach(function(trip) {
         var sh = Shareholders.getById(trip.shareholderId);
         html += '<tr>';
-        html += '<td>' + trip.id + '</td>';
+        html += '<td>' + escHtml(trip.id) + (trip.label ? ' · ' + escHtml(trip.label) : '') + '</td>';
         html += '<td>' + (sh ? sh.name : trip.shareholderId) + '</td>';
         html += '<td>' + (trip.lastSettlementDate || '-') + '</td>';
         html += '<td><button class="btn-sm btn-warning" onclick="Router.go(\'pending\')">處理</button></td>';
@@ -4546,6 +4558,8 @@ var OverviewPage = (function() {
       html += '</div>';
     }
     html += '</div>';
+    html += '<div class="form-group"><label>團備註名稱</label>';
+    html += '<input type="text" id="trip-label" class="form-input" placeholder="哪一團客人，選團/開銷歸屬時一目了然"></div>';
     html += '<div class="form-group"><label>備註</label>';
     html += '<input type="text" id="trip-notes" class="form-input"></div>';
     html += '<div style="text-align:right;margin-top:16px;">';
@@ -4559,6 +4573,7 @@ var OverviewPage = (function() {
     var hallIds = Array.from(document.querySelectorAll('.trip-hall-cb:checked')).map(function(cb) { return cb.value; });
     var memberIds = Array.from(document.querySelectorAll('.trip-member-cb:checked')).map(function(cb) { return cb.value; });
     var notes = document.getElementById('trip-notes').value;
+    var label = document.getElementById('trip-label').value.trim();
 
     var trip = Trips.create({
       shareholderId: shId,
@@ -4566,6 +4581,7 @@ var OverviewPage = (function() {
       hallIds: hallIds,
       memberIds: memberIds,
       notes: notes,
+      label: label,
     });
     Modal.close();
     Toast.success('團 ' + trip.id + ' 已建立');
@@ -4628,8 +4644,10 @@ var OverviewPage = (function() {
       html += '</div>';
     }
     html += '</div>';
+    html += '<div class="form-group"><label>團備註名稱</label>';
+    html += '<input type="text" id="trip-label-edit" class="form-input" value="' + escHtml(trip.label || '') + '" placeholder="哪一團客人，選團/開銷歸屬時一目了然"></div>';
     html += '<div class="form-group"><label>備註</label>';
-    html += '<input type="text" id="trip-notes-edit" class="form-input" value="' + (trip.notes || '') + '"></div>';
+    html += '<input type="text" id="trip-notes-edit" class="form-input" value="' + escHtml(trip.notes || '') + '"></div>';
     html += '<div style="text-align:right;margin-top:16px;">';
     html += '<button class="btn btn-primary" onclick="OverviewPage.saveEditTrip(\'' + tripId + '\')">儲存變更</button></div>';
     Modal.open('編輯團 ' + tripId, html);
@@ -4641,12 +4659,14 @@ var OverviewPage = (function() {
     var hallIds = Array.from(document.querySelectorAll('.trip-hall-cb-edit:checked')).map(function(cb) { return cb.value; });
     var memberIds = Array.from(document.querySelectorAll('.trip-member-cb-edit:checked')).map(function(cb) { return cb.value; });
     var notes = document.getElementById('trip-notes-edit').value;
+    var label = document.getElementById('trip-label-edit').value.trim();
     Trips.update(tripId, {
       shareholderId: shId,
       agentId: agentId,
       hallIds: hallIds,
       memberIds: memberIds,
       notes: notes,
+      label: label,
     });
     Modal.close();
     Toast.success('團 ' + tripId + ' 已更新');
@@ -4970,6 +4990,11 @@ var PendingPage = (function() {
  * 12栏试算表 + 开销子表格 + 退佣两段 + 代理篩選
  */
 var MemberPage = (function() {
+  function escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
   var _selectedTrip = null;
   var _selectedAgent = null;
   var _activeSubTab = 'transactions'; // 'transactions' | 'agents'
@@ -5016,7 +5041,7 @@ var MemberPage = (function() {
     html += '<option value="">選擇團...</option>';
     trips.forEach(function(trip) {
       var sh = Shareholders.getById(trip.shareholderId);
-      html += '<option value="' + trip.id + '"' + (_selectedTrip === trip.id ? ' selected' : '') + '>' + trip.id + ' - ' + (sh ? sh.name : '') + (trip.status === TRIP_STATUS.PENDING_SETTLEMENT ? ' (待結帳)' : '') + '</option>';
+      html += '<option value="' + escHtml(trip.id) + '"' + (_selectedTrip === trip.id ? ' selected' : '') + '>' + escHtml(Trips.displayName(trip)) + ' - ' + escHtml(sh ? sh.name : '') + (trip.status === TRIP_STATUS.PENDING_SETTLEMENT ? ' (待結帳)' : '') + '</option>';
     });
     html += '</select>';
     // 代理筛选
@@ -5760,7 +5785,7 @@ var RoomPage = (function() {
     html += '<option value="">全部訂房</option>';
     trips.forEach(function(trip) {
       var sh = Shareholders.getById(trip.shareholderId);
-      html += '<option value="' + trip.id + '"' + (_selectedTrip === trip.id ? ' selected' : '') + '>' + trip.id + ' - ' + (sh ? sh.name : '') + '</option>';
+      html += '<option value="' + trip.id + '"' + (_selectedTrip === trip.id ? ' selected' : '') + '>' + escHtml(Trips.displayName(trip)) + ' - ' + (sh ? sh.name : '') + '</option>';
     });
     html += '</select>';
     html += '<button class="btn" style="background:var(--bg-tertiary);color:var(--text-primary);" onclick="RoomPage.showHotelConfig()">\u2699\uFE0F 酒店設定</button>';
@@ -6570,17 +6595,19 @@ var RoomPage = (function() {
     html += '<div style="border-bottom:2px solid var(--border);padding-bottom:12px;margin-bottom:12px;">';
     html += '<h4 style="margin:0 0 8px;">\u2795 新增酒店配置</h4>';
     html += '<div class="form-row">';
-    html += '<div class="form-group"><label>體系</label><input type="text" id="hc-new-casino" class="form-input" placeholder="如: 金沙" list="hc-casino-list"></div>';
-    html += '<div class="form-group"><label>酒店</label><input type="text" id="hc-new-hotel" class="form-input" placeholder="如: 倫敦人"></div>';
+    html += '<div class="form-group"><label>體系</label><input type="text" id="hc-new-casino" class="form-input" placeholder="如: 金沙" list="hc-casino-list" oninput="RoomPage.onHcCasinoInput()"></div>';
+    html += '<div class="form-group"><label>酒店</label><input type="text" id="hc-new-hotel" class="form-input" placeholder="如: 倫敦人" list="hc-hotel-list" oninput="RoomPage.onHcHotelInput()"></div>';
     html += '</div>';
     html += '<div class="form-row">';
-    html += '<div class="form-group"><label>房型</label><input type="text" id="hc-new-room" class="form-input" placeholder="如: 名匯普通房"></div>';
+    html += '<div class="form-group"><label>房型</label><input type="text" id="hc-new-room" class="form-input" placeholder="如: 名匯普通房" list="hc-room-list"></div>';
     html += '<div class="form-group"><label>代碼</label><input type="text" id="hc-new-code" class="form-input" placeholder="如: RK"></div>';
     html += '<div class="form-group"><label>門檻(萬)</label><input type="number" id="hc-new-threshold" class="form-input" placeholder="如: 60" step="1" min="0"></div>';
     html += '</div>';
     html += '<datalist id="hc-casino-list">';
     casinos0.forEach(function(c) { html += '<option value="' + escHtml(c) + '">'; });
     html += '</datalist>';
+    html += '<datalist id="hc-hotel-list"></datalist>';
+    html += '<datalist id="hc-room-list"></datalist>';
     html += '<div style="text-align:right;margin-top:8px;">';
     html += '<button class="btn btn-primary" onclick="RoomPage.saveNewHotelConfig()">新增</button>';
     html += '</div>';
@@ -6598,7 +6625,7 @@ var RoomPage = (function() {
 
       hotels.forEach(function(hotelName) {
         var rooms = HotelConfig.getRooms(casino, hotelName);
-        html += '<div style="margin-left:12px;margin-bottom:8px;">';
+        html += '<div style="margin-left:12px;margin-bottom:8px;" data-hotel="' + escHtml(casino + '|' + hotelName) + '">';
         html += '<div style="font-weight:600;margin:4px 0;color:var(--text-primary);">' + escHtml(hotelName) + '</div>';
         html += '<table class="data-table" style="font-size:var(--font-size-sm);"><thead><tr>';
         html += '<th>房型</th><th>代碼</th><th class="num">門檻(萬)</th><th>操作</th>';
@@ -6635,6 +6662,50 @@ var RoomPage = (function() {
     Toast.success('門檻已更新: ' + wan + '萬');
   }
 
+  /* ===== 新增表單：體系/酒店/房型 datalist 動態過濾 ===== */
+  function _norm(s) { return String(s || '').replace(/\s+/g, ''); }
+  function _allHotels() {
+    var seen = {}, out = [];
+    HotelConfig.getAll().forEach(function(h) {
+      if (h.hotel && !seen[h.hotel]) { seen[h.hotel] = true; out.push(h.hotel); }
+    });
+    return out;
+  }
+  function onHcCasinoInput() {
+    var el = document.getElementById('hc-new-casino');
+    if (!el) return;
+    var casino = (el.value || '').trim();
+    /* 體系存在 → 只列該體系酒店；新體系 → 列全部酒店供參考 */
+    var hotels = HotelConfig.getHotels(casino);
+    if (hotels.length === 0) hotels = _allHotels();
+    var dl = document.getElementById('hc-hotel-list');
+    if (dl) dl.innerHTML = hotels.map(function(h) { return '<option value="' + escHtml(h) + '">'; }).join('');
+    var dr = document.getElementById('hc-room-list');
+    if (dr) dr.innerHTML = '';
+  }
+  function onHcHotelInput() {
+    var casino = (document.getElementById('hc-new-casino') ? document.getElementById('hc-new-casino').value : '') || '';
+    var hotel = (document.getElementById('hc-new-hotel') ? document.getElementById('hc-new-hotel').value : '') || '';
+    var rooms = (casino && hotel) ? HotelConfig.getRooms(casino.trim(), hotel.trim()) : [];
+    var dr = document.getElementById('hc-room-list');
+    if (dr) dr.innerHTML = rooms.map(function(r) { return '<option value="' + escHtml(r.room) + '">'; }).join('');
+  }
+  /* 新增後捲動到新酒店區塊並高亮，讓「已加入該體系列表」一目了然 */
+  function _scrollToHotelBlock(casino, hotel) {
+    setTimeout(function() {
+      var box = document.querySelector('#modal-overlay .modal-box') || document.querySelector('.modal-box');
+      var block = document.querySelector('[data-hotel="' + escHtml(casino + '|' + hotel) + '"]');
+      if (block && block.scrollIntoView) {
+        block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        block.style.transition = 'background 1.5s';
+        block.style.background = 'var(--warning)';
+        setTimeout(function() { block.style.background = ''; }, 1600);
+      } else if (box && block) {
+        box.scrollTop = block.offsetTop - 120;
+      }
+    }, 60);
+  }
+
   function saveNewHotelConfig() {
     var casino = document.getElementById('hc-new-casino').value.trim();
     var hotel = document.getElementById('hc-new-hotel').value.trim();
@@ -6647,6 +6718,10 @@ var RoomPage = (function() {
       return;
     }
 
+    /* 體系名正規化：與既有體系去空白後相同 → 沿用既有名稱，避免拼錯造成新群組 */
+    var existed = HotelConfig.getCasinos().find(function(c) { return _norm(c) === _norm(casino); });
+    if (existed) casino = existed;
+
     HotelConfig.create({
       casino: casino,
       hotel: hotel,
@@ -6656,6 +6731,7 @@ var RoomPage = (function() {
     });
     Toast.success('已新增: ' + casino + ' / ' + hotel + ' / ' + room);
     showHotelConfig(true); /* 重新渲染 Modal，保留捲動位置 */
+    _scrollToHotelBlock(casino, hotel); /* 捲動到新酒店所在區塊並高亮 */
   }
 
   function delHotelConfig(id) {
@@ -6709,6 +6785,7 @@ var RoomPage = (function() {
     pushExpenseToMember: pushExpenseToMember,
     showHotelConfig: showHotelConfig, saveHotelThreshold: saveHotelThreshold,
     saveNewHotelConfig: saveNewHotelConfig, delHotelConfig: delHotelConfig,
+    onHcCasinoInput: onHcCasinoInput, onHcHotelInput: onHcHotelInput,
     setCheckedOut: setCheckedOut, linkMember: linkMember, saveLinkMember: saveLinkMember,
   };
 })();
@@ -6753,7 +6830,7 @@ var FeesPage = (function() {
     html += '<select id="fees-trip-select" class="form-input" style="width:auto;" onchange="FeesPage.selectTrip(this.value)">';
     html += '<option value="">選擇團...</option>';
     trips.forEach(function(t) {
-      html += '<option value="' + t.id + '"' + (_selectedTrip === t.id ? ' selected' : '') + '>' + t.id + ' ' + (t.note || '') + '</option>';
+      html += '<option value="' + escHtml(t.id) + '"' + (_selectedTrip === t.id ? ' selected' : '') + '>' + escHtml(Trips.displayName(t)) + '</option>';
     });
     html += '</select></div></div></div>';
 
@@ -7104,7 +7181,7 @@ var ProfitPage = (function() {
     html += '<select id="profit-trip-select" class="form-input" style="width:auto;" onchange="ProfitPage.selectTrip(this.value)">';
     html += '<option value="">選擇團...</option>';
     trips.forEach(function(t) {
-      html += '<option value="' + t.id + '"' + (_selectedTrip === t.id ? ' selected' : '') + '>' + t.id + ' ' + (t.note || '') + '</option>';
+      html += '<option value="' + escHtml(t.id) + '"' + (_selectedTrip === t.id ? ' selected' : '') + '>' + escHtml(Trips.displayName(t)) + '</option>';
     });
     html += '</select></div></div></div>';
 
@@ -9032,7 +9109,7 @@ var WalletPage = (function() {
     if (!id) return '';
     var t = (State.get('trips') || []).find(function(t) { return t.id === id; });
     if (!t) return id;
-    return t.label ? (t.id + ' ' + t.label) : t.id;
+    return Trips.displayName(t);
   }
 
   function memberOptions(selectedId) {
@@ -9048,7 +9125,7 @@ var WalletPage = (function() {
     var html = '<option value="">（無）</option>';
     (State.get('trips') || []).forEach(function(t) {
       var s = t.id === selectedId ? ' selected' : '';
-      html += '<option value="' + escHtml(t.id) + '"' + s + '>' + escHtml(t.label ? (t.id + ' ' + t.label) : t.id) + '</option>';
+      html += '<option value="' + escHtml(t.id) + '"' + s + '>' + escHtml(Trips.displayName(t)) + '</option>';
     });
     return html;
   }
