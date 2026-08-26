@@ -54,6 +54,8 @@ var STORAGE_KEYS = {
   WALLET_TXS:        'tw1_wallet_txs',
   LOANS:             'tw1_loans',
   PENDING_EXPS:      'tw1_pending_exps',
+  CATALOG:           'tw1_catalog',
+  AUDIT_LOG:         'tw1_audit_log',
   AUTH:              'tw1_auth',
   USERS:             'tw1_users',
   PWD_HASH:          'tw1_pwd_hash',
@@ -106,6 +108,8 @@ var FB_PATH = {
   WALLET_TXS:     FB_DATA_ROOT + '/walletTxs',
   LOANS:          FB_DATA_ROOT + '/loans',
   PENDING_EXPS:   FB_DATA_ROOT + '/pendingExps',
+  CATALOG:        FB_DATA_ROOT + '/catalog',
+  AUDIT_LOG:      FB_DATA_ROOT + '/auditLog',
   USERS:          FB_DATA_ROOT + '/users',
   CLEARED:        FB_DATA_ROOT + '/clearedAt',
   CONNECTED:      '.info/connected',
@@ -143,8 +147,21 @@ var EVENTS = {
   SUPPLEMENT_UPDATED:  'supplement:updated',
   SUPPLEMENT_DELETED:  'supplement:deleted',
   WALLET_TXS_LOADED:   'walletTxs:loaded',
+  WALLET_TXS_UPDATED:  'walletTxs:updated',
   LOANS_LOADED:        'loans:loaded',
+  LOAN_CREATED:        'loan:created',
+  LOAN_UPDATED:        'loan:updated',
+  LOAN_DELETED:        'loan:deleted',
   PENDING_EXPS_LOADED: 'pendingExps:loaded',
+  PEXP_CREATED:        'pexp:created',
+  PEXP_UPDATED:        'pexp:updated',
+  PEXP_DELETED:        'pexp:deleted',
+  CATALOG_LOADED:      'catalog:loaded',
+  CATALOG_UPDATED:     'catalog:updated',
+  AUDIT_LOG_LOADED:    'auditLog:loaded',
+  AUDIT_LOGGED:        'auditLog:logged',
+  USER_SAVED:          'user:saved',
+  USER_DELETED:        'user:deleted',
   SETTINGS_UPDATED:  'settings:updated',
   SETTINGS_LOADED:   'settings:loaded',
   HOTEL_CONFIG_LOADED:  'hotelConfig:loaded',
@@ -234,7 +251,10 @@ var PAGES = [
   { id: 'page-shareholder', name: 'shareholder', label: '股東分潤',   icon: '\uD83D\uDCB0', shortcut: '5' },
   { id: 'page-members-mgmt',name: 'membersMgmt', label: '會員管理',   icon: '\u2699\uFE0F', shortcut: '6' },
   { id: 'page-history',     name: 'history',     label: '歷史查詢',   icon: '\uD83D\uDD0D', shortcut: '7' },
+  { id: 'page-reports',     name: 'reports',     label: '報表中心',   icon: '\uD83D\uDCC4', shortcut: '9' },
   { id: 'page-wallet',      name: 'wallet',      label: '錢包流水',   icon: '\uD83D\uDCB5', shortcut: '8' },
+  { id: 'page-agent',       name: 'agent',       label: '代理管理',   icon: '\uD83D\uDC65' },
+  { id: 'page-audit-log',   name: 'auditLog',    label: '操作日誌',   icon: '\uD83D\uDCDC' },
   { id: 'page-settings',    name: 'settings',    label: '系統設定',   icon: '\u2699\uFE0F', shortcut: '0' },
 ];
 
@@ -765,6 +785,184 @@ var Auth = (function() {
     isAuthenticated: isAuthenticated,
     touch: touch,
     sha256: sha256,
+  };
+})();
+
+
+// === src/core/permissions.js ===
+/**
+ * core/permissions.js — 角色權限（與 APP Perm 模組同邏輯）
+ * session 由 Auth.getCurrent() 同步；5 預設角色（2026-08-20 拍板）
+ * 依賴: core/constants.js, core/auth.js
+ */
+var Perm = (function() {
+  var MODE_RANK = { none: 0, read: 1, write: 2 };
+
+  var PAGE_KEYS = [
+    'overview', 'pending', 'member', 'wallet', 'room', 'fees', 'profit',
+    'agent', 'shareholder', 'membersMgmt', 'history', 'reports', 'settings', 'auditLog',
+  ];
+
+  var SPECIAL_KEYS = ['export', 'backup', 'userMgmt', 'settingsEdit', 'unlockArchived'];
+
+  function _allPages(mode) {
+    var m = {};
+    PAGE_KEYS.forEach(function(p) { m[p] = mode; });
+    return m;
+  }
+  function _allSpecials(v) {
+    var m = {};
+    SPECIAL_KEYS.forEach(function(s) { m[s] = v; });
+    return m;
+  }
+
+  var ROLES = {
+    super_admin: {
+      label: '超級管理員',
+      pages: _allPages('write'),
+      special: _allSpecials(true),
+    },
+    admin: {
+      label: '管理員',
+      pages: _allPages('write'),
+      special: _allSpecials(true),
+    },
+    accountant: {
+      label: '會計',
+      pages: {
+        overview: 'read', pending: 'write', member: 'write', wallet: 'write', room: 'read',
+        fees: 'write', profit: 'write', agent: 'read', shareholder: 'write',
+        membersMgmt: 'write', history: 'write', reports: 'write', settings: 'read',
+      },
+      special: { export: true },
+    },
+    room: {
+      label: '房務',
+      pages: {
+        overview: 'read', pending: 'read', member: 'read', room: 'write',
+        history: 'read',
+      },
+      special: {},
+    },
+    viewer: {
+      label: '唯讀',
+      pages: Object.assign(_allPages('read'), { auditLog: 'none' }),
+      special: {},
+    },
+  };
+
+  var COLLECTION_PAGES = {
+    members:       ['member', 'membersMgmt'],
+    memberTxs:     ['member', 'membersMgmt'],
+    walletTxs:     ['wallet'],
+    pendingExps:   ['member', 'wallet'],
+    catalog:       ['member', 'wallet'],
+    loans:         ['wallet'],
+    trips:         ['member', 'pending'],
+    supplements:   ['fees', 'member'],
+    bookings:      ['room', 'pending'],
+    agents:        ['agent'],
+    shareholders:  ['shareholder'],
+    settings:      ['settings'],
+    extraIncome:   ['settings'],
+    hotelConfig:   ['settings'],
+    employeeList:  ['settings'],
+    users:         ['settings'],
+  };
+
+  var _session = null;
+  var _pagePerms = null;
+  var _specials = null;
+
+  function _mode(v) {
+    return MODE_RANK.hasOwnProperty(v) ? v : 'none';
+  }
+
+  function _buildPerms(role, overrides) {
+    var base = ROLES[role];
+    var pages, specials;
+    if (!base) {
+      pages = _allPages('none');
+      specials = _allSpecials(false);
+    } else {
+      pages = Object.assign({}, base.pages);
+      specials = Object.assign({}, base.special);
+    }
+    if (overrides && typeof overrides === 'object') {
+      var op = overrides.pages || {};
+      PAGE_KEYS.forEach(function(p) {
+        if (op[p] !== undefined) pages[p] = _mode(op[p]);
+      });
+      var os = overrides.special || {};
+      SPECIAL_KEYS.forEach(function(s) {
+        if (typeof os[s] === 'boolean') specials[s] = os[s];
+      });
+    }
+    return { pages: pages, specials: specials };
+  }
+
+  function setSession(user) {
+    _session = user ? {
+      uid: user.uid || user.id || '',
+      email: user.email || '',
+      name: user.name || '',
+      role: user.role || '',
+    } : null;
+    var built = _buildPerms(user && user.role, user && user.permissions);
+    _pagePerms = built.pages;
+    _specials = built.specials;
+  }
+
+  function clear() {
+    _session = null;
+    _pagePerms = null;
+    _specials = null;
+  }
+
+  function hasSession() { return _session !== null; }
+  function sessionUser() { return _session; }
+
+  function can(page, mode) {
+    var need = MODE_RANK[mode] !== undefined ? mode : 'read';
+    if (!_pagePerms) return true;
+    var have = _pagePerms[page] !== undefined ? _pagePerms[page] : 'none';
+    return MODE_RANK[have] >= MODE_RANK[need];
+  }
+  function canWrite(page) { return can(page, 'write'); }
+  function canRead(page) { return can(page, 'read'); }
+
+  function canSpecial(name) {
+    if (!_specials) return true;
+    return _specials[name] === true;
+  }
+  function canManageUsers() {
+    if (!_session) return true;
+    return canSpecial('userMgmt');
+  }
+  function canWriteCollection(collection) {
+    if (!_pagePerms) return true;
+    var pages = COLLECTION_PAGES[collection];
+    if (!pages) return true;
+    for (var i = 0; i < pages.length; i++) {
+      if (canWrite(pages[i])) return true;
+    }
+    return false;
+  }
+
+  function effectivePerms() {
+    return { pages: Object.assign({}, _pagePerms), specials: Object.assign({}, _specials) };
+  }
+  function roleLabel(role) { return ROLES[role] ? ROLES[role].label : (role || '未知角色'); }
+  function roleIds() { return Object.keys(ROLES); }
+
+  return {
+    ROLES: ROLES,
+    setSession: setSession, clear: clear,
+    hasSession: hasSession, sessionUser: sessionUser,
+    can: can, canRead: canRead, canWrite: canWrite,
+    canSpecial: canSpecial, canManageUsers: canManageUsers,
+    canWriteCollection: canWriteCollection,
+    effectivePerms: effectivePerms, roleLabel: roleLabel, roleIds: roleIds,
   };
 })();
 
@@ -1538,6 +1736,8 @@ function _setupWatchers() {
     { key: 'WALLET_TXS',   storeKey: STORAGE_KEYS.WALLET_TXS,   event: EVENTS.WALLET_TXS_LOADED,     stateKey: 'walletTxs' },
     { key: 'LOANS',        storeKey: STORAGE_KEYS.LOANS,         event: EVENTS.LOANS_LOADED,          stateKey: 'loans' },
     { key: 'PENDING_EXPS', storeKey: STORAGE_KEYS.PENDING_EXPS,  event: EVENTS.PENDING_EXPS_LOADED,   stateKey: 'pendingExps' },
+    { key: 'CATALOG',      storeKey: STORAGE_KEYS.CATALOG,       event: EVENTS.CATALOG_LOADED,        stateKey: 'catalog' },
+    { key: 'AUDIT_LOG',    storeKey: STORAGE_KEYS.AUDIT_LOG,     event: EVENTS.AUDIT_LOG_LOADED,      stateKey: 'auditLog' },
   ];
 
   watchList.forEach(function(w) {
@@ -1633,6 +1833,7 @@ function _resyncAll() {
     FB_PATH.TRIPS, FB_PATH.MEMBER_TXS, FB_PATH.BOOKINGS,
     FB_PATH.SUPPLEMENTS, FB_PATH.SETTINGS, FB_PATH.EXTRA_INCOME,
     FB_PATH.HOTEL_CONFIG, FB_PATH.WALLET_TXS, FB_PATH.LOANS, FB_PATH.PENDING_EXPS,
+    FB_PATH.CATALOG, FB_PATH.AUDIT_LOG,
   ];
   var storeMap = {};
   storeMap[FB_PATH.MEMBERS]       = { storeKey: STORAGE_KEYS.MEMBERS,       event: EVENTS.MEMBERS_LOADED,       stateKey: 'members' };
@@ -1648,6 +1849,8 @@ function _resyncAll() {
   storeMap[FB_PATH.WALLET_TXS]    = { storeKey: STORAGE_KEYS.WALLET_TXS,    event: EVENTS.WALLET_TXS_LOADED,     stateKey: 'walletTxs' };
   storeMap[FB_PATH.LOANS]         = { storeKey: STORAGE_KEYS.LOANS,         event: EVENTS.LOANS_LOADED,          stateKey: 'loans' };
   storeMap[FB_PATH.PENDING_EXPS]  = { storeKey: STORAGE_KEYS.PENDING_EXPS,  event: EVENTS.PENDING_EXPS_LOADED,   stateKey: 'pendingExps' };
+  storeMap[FB_PATH.CATALOG]       = { storeKey: STORAGE_KEYS.CATALOG,       event: EVENTS.CATALOG_LOADED,        stateKey: 'catalog' };
+  storeMap[FB_PATH.AUDIT_LOG]     = { storeKey: STORAGE_KEYS.AUDIT_LOG,     event: EVENTS.AUDIT_LOG_LOADED,      stateKey: 'auditLog' };
 
   syncPaths.forEach(function(path) {
     var cfg = storeMap[path];
@@ -2002,6 +2205,10 @@ var Trips = (function() {
 /**
  * data/memberTxs.js — 会员帐务 CRUD
  * 依赖: core/constants.js, core/store.js, sync/uploader.js, calc/member.js
+ *
+ * 帳務 → 錢包衍生流水（與 APP Wallet.syncForTx 同邏輯）：
+ *   wtx_<txId>      籌碼淨額（現金碼：回−出；信用碼：僅超贏）
+ *   wtx_<txId>_exp  開銷公司實支（fromPend 行不計，預支登錄時已扣）
  */
 var MemberTxs = (function() {
   function load() {
@@ -2025,6 +2232,71 @@ var MemberTxs = (function() {
   function getByMember(memberId) {
     return getAll().filter(function(t) { return t.memberId === memberId; });
   }
+
+  /* —— 籌碼淨額（HKD，正=現鈔流入公司）—— */
+  function chipNetHKD(tx) {
+    var out = (tx.outCode || 0) * 10000;
+    var back = (tx.backCode || 0) * 10000;
+    if (tx.chipType === 'credit') return back > out ? back - out : 0;
+    return back - out;
+  }
+  /* —— 開銷公司實支（HKD）：fromPend 行不計（預支登錄當下錢包已扣，不可重複）—— */
+  function _expPayout(e) {
+    if (e.fromPend) return 0;
+    if (e.payout !== undefined && e.payout !== null) return e.payout || 0;
+    if (e.ourPrice !== undefined && e.ourPrice !== null && e.ticketType && e.ticketType !== 'other' && e.ticketType !== 'loan') {
+      return (e.ourPrice || 0) * (e.quantity || 1);
+    }
+    return e.amountHK || 0;
+  }
+  function expensePayoutHKD(tx) {
+    var total = (tx.expenses || []).reduce(function(s, e) { return s + _expPayout(e); }, 0);
+    return Math.round(total);
+  }
+
+  /* —— 帳務 → 錢包同步（create/update 後呼叫；刪除呼叫 _removeWalletFor）—— */
+  function _syncWallet(tx) {
+    if (typeof WalletTxs === 'undefined' || !tx) return;
+    if (tx._deleted) { _removeWalletFor(tx.id); return; }
+    var m = (typeof Members !== 'undefined') ? Members.getById(tx.memberId) : null;
+    var note = m ? (m.id + ' ' + (m.name || '')) : (tx.memberId || '');
+
+    var chip = Math.round(chipNetHKD(tx));
+    var chipId = 'wtx_' + tx.id;
+    if (chip !== 0) {
+      WalletTxs.upsertDerived(chipId, {
+        type: tx.chipType === 'credit' ? 'credit_tx' : 'member_tx',
+        refId: tx.id, tripId: tx.tripId, memberId: tx.memberId,
+        amountHKD: chip, date: tx.date,
+        note: note,
+        detail: { outCode: tx.outCode || 0, backCode: tx.backCode || 0, chipType: tx.chipType || 'cash' },
+      });
+    } else {
+      WalletTxs.removeById(chipId);
+    }
+
+    var pay = expensePayoutHKD(tx);
+    var expId = chipId + '_exp';
+    if (pay > 0) {
+      WalletTxs.upsertDerived(expId, {
+        type: 'expense',
+        refId: tx.id, tripId: tx.tripId, memberId: tx.memberId,
+        amountHKD: -pay, date: tx.date,
+        note: note,
+        detail: { items: (tx.expenses || []).map(function(e) {
+          return { name: e.name || '', amountHK: e.amountHK || 0, payout: _expPayout(e), absorbed: !!e.absorbed, fromPend: !!e.fromPend };
+        }) },
+      });
+    } else {
+      WalletTxs.removeById(expId);
+    }
+  }
+  function _removeWalletFor(txId) {
+    if (typeof WalletTxs === 'undefined') return;
+    WalletTxs.removeById('wtx_' + txId);
+    WalletTxs.removeById('wtx_' + txId + '_exp');
+  }
+
   function create(data) {
     var now = Date.now();
     var id = 'mtx_' + data.tripId + '_' + data.memberId + '_' + now;
@@ -2044,6 +2316,7 @@ var MemberTxs = (function() {
     save(arr);
     var obj = {}; obj[tx._fbKey] = tx;
     enqueue(FB_PATH.MEMBER_TXS, obj);
+    _syncWallet(tx);
     EventBus.emit(EVENTS.MTX_CREATED, tx);
     return tx;
   }
@@ -2068,6 +2341,7 @@ var MemberTxs = (function() {
     save(arr);
     var obj = {}; obj[merged._fbKey] = merged;
     enqueue(FB_PATH.MEMBER_TXS, obj);
+    _syncWallet(merged);
     EventBus.emit(EVENTS.MTX_UPDATED, merged);
     return merged;
   }
@@ -2080,9 +2354,15 @@ var MemberTxs = (function() {
     save(arr);
     var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
     enqueue(FB_PATH.MEMBER_TXS, obj);
+    _removeWalletFor(id);
     EventBus.emit(EVENTS.MTX_DELETED, id);
   }
-  return { load: load, save: save, getAll: getAll, getById: getById, getByTrip: getByTrip, getByMember: getByMember, create: create, update: update, remove: remove };
+  return {
+    load: load, save: save, getAll: getAll, getById: getById,
+    getByTrip: getByTrip, getByMember: getByMember,
+    create: create, update: update, remove: remove,
+    chipNetHKD: chipNetHKD, expensePayoutHKD: expensePayoutHKD,
+  };
 })();
 
 
@@ -2638,10 +2918,701 @@ var WalletTxs = (function() {
     var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
     enqueue(FB_PATH.WALLET_TXS, obj);
   }
+  /* —— 衍生流水同步（loans/pendExps 模組專用）：依 id upsert，保留既有 _fbKey —— */
+  function upsertDerived(id, data) {
+    var arr = State.get('walletTxs') || [];
+    var idx = arr.findIndex(function(w) { return w.id === id; });
+    var now = Date.now();
+    if (idx >= 0 && arr[idx]._deleted) {
+      /* 曾被刪除的衍生流水：來源仍在變動時重建（與 APP reconcileAll 行為一致） */
+      arr[idx]._deleted = false;
+    }
+    var item = idx >= 0 ? Object.assign({}, arr[idx], data) : Object.assign({ id: id }, data);
+    item.id = id;
+    item._fbKey = (idx >= 0 && arr[idx]._fbKey) ? arr[idx]._fbKey : id;
+    item._updatedAt = now;
+    if (idx >= 0) arr[idx] = item; else arr.push(item);
+    save(arr);
+    var obj = {}; obj[item._fbKey] = item;
+    enqueue(FB_PATH.WALLET_TXS, obj);
+    EventBus.emit(EVENTS.WALLET_TXS_UPDATED, item);
+    return item;
+  }
+  function removeById(id) {
+    var arr = State.get('walletTxs') || [];
+    var idx = arr.findIndex(function(w) { return w.id === id; });
+    if (idx < 0) return;
+    arr[idx]._deleted = true;
+    arr[idx]._updatedAt = Date.now();
+    save(arr);
+    var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
+    enqueue(FB_PATH.WALLET_TXS, obj);
+  }
   return {
     load: load, save: save, getAll: getAll, getById: getById,
     isDerived: isDerived, isManual: isManual,
     create: create, update: update, remove: remove,
+    upsertDerived: upsertDerived, removeById: removeById,
+  };
+})();
+
+
+// === src/data/loans.js ===
+/**
+ * data/loans.js — 港幣借支 CRUD（與 APP Loans 模組同邏輯）
+ * 借出即扣錢包；部分/全額回收逐筆記錄；未回收隨時計算（outstanding）
+ * 建立/更新/回收/刪除時同步衍生錢包流水（wtx_loan_<id> 借出 / wtx_loanr_<id> 回收）
+ * 依賴: core/constants.js, core/store.js, core/state.js, core/time.js, sync/uploader.js, data/walletTxs.js
+ */
+var Loans = (function() {
+  function load() {
+    var arr = Store.readArray(STORAGE_KEYS.LOANS);
+    State.set('loans', arr);
+    return arr;
+  }
+  function save(arr) {
+    Store.writeArray(STORAGE_KEYS.LOANS, arr);
+    State.set('loans', arr);
+  }
+  function getAll() {
+    return (State.get('loans') || []).filter(function(l) { return !l._deleted; });
+  }
+  function getById(id) {
+    return getAll().find(function(l) { return l.id === id; });
+  }
+  function getByMember(memberId) {
+    return getAll().filter(function(l) { return l.memberId === memberId; });
+  }
+
+  function repaidTotal(l) {
+    return (l.repayments || []).reduce(function(s, r) { return s + (r.amountHKD || 0); }, 0);
+  }
+  function outstanding(l) {
+    return Math.max(0, Math.round((l.amountHKD || 0) - repaidTotal(l)));
+  }
+  function openLoans() {
+    return getAll().filter(function(l) { return outstanding(l) > 0; });
+  }
+  function openTotalByMember(memberId) {
+    return getByMember(memberId).reduce(function(s, l) { return s + outstanding(l); }, 0);
+  }
+  function openTotal() {
+    return openLoans().reduce(function(s, l) { return s + outstanding(l); }, 0);
+  }
+
+  /* —— 借支 → 錢包衍生流水同步（與 APP Wallet.syncForLoan 同 key 同金額）—— */
+  function _memberLabel(memberId) {
+    var m = (typeof Members !== 'undefined') ? (State.get('members') || []).find(function(x) { return x.id === memberId; }) : null;
+    return m ? (m.id + ' ' + (m.name || '')) : (memberId || '');
+  }
+  function _syncWallet(l) {
+    if (typeof WalletTxs === 'undefined') return;
+    var label = _memberLabel(l.memberId);
+    var amt = Math.round(l.amountHKD || 0);
+    var outId = 'wtx_loan_' + l.id;
+    if (amt > 0) {
+      WalletTxs.upsertDerived(outId, {
+        type: 'loan', refId: l.id, memberId: l.memberId,
+        amountHKD: -amt, date: l.date,
+        note: label + ' 借支',
+        detail: { note: l.note || '' },
+      });
+    } else {
+      WalletTxs.removeById(outId);
+    }
+    var reps = l.repayments || [];
+    var repTotal = reps.reduce(function(s, r) { return s + (r.amountHKD || 0); }, 0);
+    var inId = 'wtx_loanr_' + l.id;
+    if (repTotal > 0) {
+      var lastDate = reps.length ? reps[reps.length - 1].date : l.date;
+      WalletTxs.upsertDerived(inId, {
+        type: 'loan_repay', refId: l.id, memberId: l.memberId,
+        amountHKD: Math.round(repTotal), date: lastDate,
+        note: label + ' 借支回收',
+        detail: { items: reps.map(function(r) { return { date: r.date, amountHK: r.amountHKD || 0, note: r.note || '' }; }) },
+      });
+    } else {
+      WalletTxs.removeById(inId);
+    }
+  }
+  function _removeWalletFor(loanId) {
+    if (typeof WalletTxs === 'undefined') return;
+    WalletTxs.removeById('wtx_loan_' + loanId);
+    WalletTxs.removeById('wtx_loanr_' + loanId);
+  }
+
+  function create(data) {
+    var now = Date.now();
+    var amount = Math.round(data.amountHKD || 0);
+    if (!data.memberId || amount <= 0) return null;
+    var uid = 'LN' + now + '_' + Math.random().toString(36).slice(2, 6);
+    var l = {
+      id: uid,
+      memberId: data.memberId,
+      date: data.date || todayStr(),
+      note: data.note || '',
+      amountHKD: amount,
+      repayments: [],
+      createdAt: now,
+      _fbKey: uid,
+      _updatedAt: now,
+    };
+    var arr = State.get('loans') || [];
+    arr.push(l);
+    save(arr);
+    var obj = {}; obj[l._fbKey] = l;
+    enqueue(FB_PATH.LOANS, obj);
+    _syncWallet(l);
+    EventBus.emit(EVENTS.LOAN_CREATED, l);
+    return l;
+  }
+  function update(id, patch) {
+    var arr = State.get('loans') || [];
+    var idx = arr.findIndex(function(l) { return l.id === id; });
+    if (idx < 0) return null;
+    var merged = Object.assign({}, arr[idx], patch);
+    /* 守門：借出金額不可低於已回收總額 */
+    if (Math.round(merged.amountHKD || 0) < repaidTotal(arr[idx])) return null;
+    merged.amountHKD = Math.round(merged.amountHKD || 0);
+    Object.assign(arr[idx], merged, { _updatedAt: Date.now() });
+    save(arr);
+    var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
+    enqueue(FB_PATH.LOANS, obj);
+    _syncWallet(arr[idx]);
+    EventBus.emit(EVENTS.LOAN_UPDATED, arr[idx]);
+    return arr[idx];
+  }
+  /* 部分回收：金額自動夾在 1~尚欠 */
+  function repay(id, amountHKD, date, note) {
+    var arr = State.get('loans') || [];
+    var idx = arr.findIndex(function(l) { return l.id === id; });
+    if (idx < 0) return null;
+    var l = arr[idx];
+    var amt = Math.round(amountHKD || 0);
+    var max = outstanding(l);
+    if (amt <= 0) return null;
+    if (amt > max) amt = max;
+    l.repayments = (l.repayments || []).concat([{ date: date || todayStr(), amountHKD: amt, note: note || '' }]);
+    l._updatedAt = Date.now();
+    save(arr);
+    var obj = {}; obj[l._fbKey] = l;
+    enqueue(FB_PATH.LOANS, obj);
+    _syncWallet(l);
+    EventBus.emit(EVENTS.LOAN_UPDATED, l);
+    return l;
+  }
+  /* 刪單筆回收 */
+  function removeRepayment(id, idx) {
+    var arr = State.get('loans') || [];
+    var i = arr.findIndex(function(l) { return l.id === id; });
+    if (i < 0) return null;
+    var l = arr[i];
+    if (!l.repayments || idx < 0 || idx >= l.repayments.length) return null;
+    l.repayments.splice(idx, 1);
+    l._updatedAt = Date.now();
+    save(arr);
+    var obj = {}; obj[l._fbKey] = l;
+    enqueue(FB_PATH.LOANS, obj);
+    _syncWallet(l);
+    EventBus.emit(EVENTS.LOAN_UPDATED, l);
+    return l;
+  }
+  function remove(id) {
+    var arr = State.get('loans') || [];
+    var idx = arr.findIndex(function(l) { return l.id === id; });
+    if (idx < 0) return;
+    arr[idx]._deleted = true;
+    arr[idx]._updatedAt = Date.now();
+    save(arr);
+    var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
+    enqueue(FB_PATH.LOANS, obj);
+    _removeWalletFor(id);
+    EventBus.emit(EVENTS.LOAN_DELETED, id);
+  }
+
+  return {
+    load: load, save: save, getAll: getAll, getById: getById, getByMember: getByMember,
+    repaidTotal: repaidTotal, outstanding: outstanding, openLoans: openLoans,
+    openTotalByMember: openTotalByMember, openTotal: openTotal,
+    create: create, update: update, repay: repay, removeRepayment: removeRepayment, remove: remove,
+  };
+})();
+
+
+// === src/data/pendExps.js ===
+/**
+ * data/pendExps.js — 預支開銷 CRUD（與 APP PendExps 模組同邏輯）
+ * 建立時 rows 自帶 rid；已歸屬（被帳務 fromPend 引用）的預支單不可刪
+ * 建立後衍生錢包流水 wtx_pexp_<id>（payout 合計，無 payout 用 amountHK）
+ * 依賴: core/constants.js, core/store.js, core/state.js, core/time.js, sync/uploader.js, data/walletTxs.js
+ */
+var PendExps = (function() {
+  function load() {
+    var arr = Store.readArray(STORAGE_KEYS.PENDING_EXPS);
+    State.set('pendingExps', arr);
+    return arr;
+  }
+  function save(arr) {
+    Store.writeArray(STORAGE_KEYS.PENDING_EXPS, arr);
+    State.set('pendingExps', arr);
+  }
+  function getAll() {
+    return (State.get('pendingExps') || []).filter(function(p) { return !p._deleted; });
+  }
+  function getById(id) {
+    return getAll().find(function(p) { return p.id === id; });
+  }
+  function getByTrip(tripId) {
+    return getAll().filter(function(p) { return p.tripId === tripId; });
+  }
+
+  /* —— 歸屬量：掃描所有帳務的 fromPend 標記（隨需計算，不落庫）—— */
+  function _claimedMap() {
+    var map = {};
+    var txs = State.get('memberTxs') || [];
+    txs.forEach(function(tx) {
+      if (!tx || tx._deleted) return;
+      (tx.expenses || []).forEach(function(e) {
+        var fp = e.fromPend;
+        if (!fp || !fp.pid || !fp.rid) return;
+        if (!map[fp.pid]) map[fp.pid] = {};
+        map[fp.pid][fp.rid] = (map[fp.pid][fp.rid] || 0) + (fp.qty || 0);
+      });
+    });
+    return map;
+  }
+  function _claimedQty(p, row, cm) {
+    var q = (cm[p.id] && cm[p.id][row.rid]) || 0;
+    return Math.min(q, row.quantity || 1);
+  }
+  function unclaimedRows(tripId) {
+    var cm = _claimedMap();
+    var out = [];
+    getByTrip(tripId).forEach(function(p) {
+      (p.rows || []).forEach(function(row) {
+        var rem = (row.quantity || 1) - _claimedQty(p, row, cm);
+        if (rem > 0) out.push({ pend: p, row: row, remaining: rem });
+      });
+    });
+    return out;
+  }
+  function unclaimedCount(tripId) {
+    return unclaimedRows(tripId).length;
+  }
+  function hasUnclaimed(tripId) {
+    return unclaimedCount(tripId) > 0;
+  }
+  /* 刪除守門：已有帶入的預支單不可刪（先從帳務移除那些行） */
+  function isClaimed(p) {
+    var cm = _claimedMap();
+    return (p.rows || []).some(function(row) { return _claimedQty(p, row, cm) > 0; });
+  }
+
+  /* —— 預支 → 錢包衍生流水（與 APP Wallet.syncForPend 同 key 同金額）—— */
+  function _payoutHKD(p) {
+    return (p.rows || []).reduce(function(s, r) {
+      var pay = r.payout || r.amountHK || 0;
+      return s + (pay > 0 ? pay : (r.amountHK || 0));
+    }, 0);
+  }
+  function _tripLabel(tripId) {
+    var t = (State.get('trips') || []).find(function(x) { return x.id === tripId; });
+    if (!t) return tripId || '';
+    var bits = [t.id];
+    if (t.label) bits.push(t.label);
+    if (t.notes) bits.push(t.notes);
+    return bits.join(' ');
+  }
+  function _syncWallet(p) {
+    if (typeof WalletTxs === 'undefined') return;
+    var pay = _payoutHKD(p);
+    var id = 'wtx_pexp_' + p.id;
+    if (pay > 0) {
+      WalletTxs.upsertDerived(id, {
+        type: 'pexp',
+        refId: p.id, tripId: p.tripId,
+        amountHKD: -Math.round(pay), date: p.date,
+        note: _tripLabel(p.tripId) + ' 預支',
+        detail: { items: (p.rows || []).map(function(e) {
+          return { name: e.name || '', qty: e.quantity || 1, amountHK: e.amountHK || 0, payout: e.payout || e.amountHK || 0 };
+        }) },
+      });
+    } else {
+      WalletTxs.removeById(id);
+    }
+  }
+  function _removeWalletFor(pendId) {
+    if (typeof WalletTxs === 'undefined') return;
+    WalletTxs.removeById('wtx_pexp_' + pendId);
+  }
+
+  function create(data) {
+    var now = Date.now();
+    var uid = 'PE' + now + '_' + Math.random().toString(36).slice(2, 6);
+    var p = {
+      id: uid,
+      tripId: data.tripId || '',
+      agentId: data.agentId || '',
+      shareholderId: data.shareholderId || '',
+      memberId: data.memberId || '',
+      date: data.date || todayStr(),
+      note: data.note || '',
+      rows: (data.rows || []).map(function(r, i) {
+        var row = Object.assign({}, r);
+        row.rid = row.rid || ('pr' + now + '_' + i);
+        row.quantity = row.quantity || 1;
+        return row;
+      }),
+      createdAt: now,
+      _fbKey: uid,
+      _updatedAt: now,
+    };
+    var arr = State.get('pendingExps') || [];
+    arr.push(p);
+    save(arr);
+    var obj = {}; obj[p._fbKey] = p;
+    enqueue(FB_PATH.PENDING_EXPS, obj);
+    _syncWallet(p);
+    EventBus.emit(EVENTS.PEXP_CREATED, p);
+    return p;
+  }
+  function update(id, patch) {
+    var arr = State.get('pendingExps') || [];
+    var idx = arr.findIndex(function(p) { return p.id === id; });
+    if (idx < 0) return null;
+    var merged = Object.assign({}, arr[idx], patch);
+    if (merged.rows) {
+      merged.rows = merged.rows.map(function(r) {
+        var row = Object.assign({}, r);
+        if (!row.rid) row.rid = 'pr' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        row.quantity = row.quantity || 1;
+        return row;
+      });
+    }
+    Object.assign(arr[idx], merged, { _updatedAt: Date.now() });
+    save(arr);
+    var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
+    enqueue(FB_PATH.PENDING_EXPS, obj);
+    _syncWallet(arr[idx]);
+    EventBus.emit(EVENTS.PEXP_UPDATED, arr[idx]);
+    return arr[idx];
+  }
+  function remove(id) {
+    var arr = State.get('pendingExps') || [];
+    var idx = arr.findIndex(function(p) { return p.id === id; });
+    if (idx < 0) return;
+    arr[idx]._deleted = true;
+    arr[idx]._updatedAt = Date.now();
+    save(arr);
+    var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
+    enqueue(FB_PATH.PENDING_EXPS, obj);
+    _removeWalletFor(id);
+    EventBus.emit(EVENTS.PEXP_DELETED, id);
+  }
+
+  return {
+    load: load, save: save, getAll: getAll, getById: getById, getByTrip: getByTrip,
+    unclaimedRows: unclaimedRows, unclaimedCount: unclaimedCount, hasUnclaimed: hasUnclaimed, isClaimed: isClaimed,
+    payoutHKD: _payoutHKD,
+    claimInfo: function(p) {
+      var cm = _claimedMap();
+      return (p.rows || []).map(function(row) {
+        var c = _claimedQty(p, row, cm);
+        return { row: row, claimed: c, remaining: (row.quantity || 1) - c };
+      });
+    },
+    create: create, update: update, remove: remove,
+  };
+})();
+
+
+// === src/data/catalog.js ===
+/**
+ * data/catalog.js — 品項主檔 CRUD（與 APP Catalog 模組同邏輯）
+ * 預載常用票券；水舞間/水上樂園價格吃設定頁「門票預設價格」（單一資料來源）
+ * 依賴: core/constants.js, core/store.js, core/state.js, sync/uploader.js, data/settings.js
+ */
+var Catalog = (function() {
+  var SEED_ITEMS = [
+    { name: '新濠影匯 - 童夢天地', category: 'park', defaultPriceHK: 0 },
+    { name: '巴黎人 - 巴黎鐵塔', category: 'tower', defaultPriceHK: 0 },
+    { name: '巴黎人 - teamLab 門票', category: 'show', defaultPriceHK: 0 },
+    { name: '永利皇宮 - 觀光纜車', category: 'transport', defaultPriceHK: 0 },
+    { name: '美獅美高梅 - 悠然自得', category: 'show', defaultPriceHK: 0 },
+    { name: '摩珀斯酒店 - 餐飲券', category: 'food', defaultPriceHK: 0 },
+  ];
+  var CATEGORY_LABELS = {
+    show: '表演/門票',
+    park: '樂園',
+    tower: '觀景塔',
+    transport: '交通/纜車',
+    food: '餐飲',
+    hotel: '酒店',
+    other: '其他',
+  };
+
+  function load() {
+    var arr = Store.readArray(STORAGE_KEYS.CATALOG);
+    if (!arr || arr.length === 0) {
+      var now = Date.now();
+      arr = SEED_ITEMS.map(function(it, i) {
+        return {
+          id: 'CATS' + (now + i),
+          name: it.name,
+          defaultPriceHK: it.defaultPriceHK || 0,
+          category: it.category || 'other',
+          isSeed: true,
+          createdAt: now,
+          _fbKey: 'CATS' + (now + i),
+          _updatedAt: now,
+        };
+      });
+      save(arr);
+    }
+    State.set('catalog', arr);
+    return arr;
+  }
+  function save(arr) {
+    Store.writeArray(STORAGE_KEYS.CATALOG, arr);
+    State.set('catalog', arr);
+  }
+  function getAll() {
+    return (State.get('catalog') || []).filter(function(c) { return !c._deleted; });
+  }
+  function getById(id) {
+    return getAll().find(function(c) { return c.id === id; });
+  }
+  function findByName(name) {
+    if (!name) return null;
+    var n = String(name).trim();
+    return getAll().find(function(c) { return c.name === n; }) || null;
+  }
+  function byCategory(cat) {
+    return getAll().filter(function(c) { return c.category === cat; }).sort(function(a, b) { return a.name.localeCompare(b.name, 'zh'); });
+  }
+  function categoryLabel(cat) { return CATEGORY_LABELS[cat] || '其他'; }
+  function allCategories() {
+    var seen = {}; var order = [];
+    getAll().forEach(function(c) { if (c.category && !seen[c.category]) { seen[c.category] = 1; order.push(c.category); } });
+    return order;
+  }
+
+  /* 固定票種：讀設定頁「門票預設價格」，價格隨設定即時變動 */
+  function fixedTickets() {
+    var tp = (typeof Settings !== 'undefined' && Settings.getTicketPrices) ? Settings.getTicketPrices() : {};
+    var out = [];
+    (tp.waterDance || []).forEach(function(t, i) {
+      out.push({ key: 'WD' + i, name: '水舞間 ' + t.name, guestPrice: t.guestPrice || 0, ourPrice: t.ourPrice || 0, category: 'show' });
+    });
+    var wp = tp.waterPark || { guestPrice: 450, ourPrice: 406 };
+    out.push({ key: 'WP', name: '水上樂園手帶', guestPrice: wp.guestPrice || 0, ourPrice: wp.ourPrice || 0, category: 'park' });
+    return out;
+  }
+  function findFixedByName(name) {
+    if (!name) return null;
+    var n = String(name).trim();
+    return fixedTickets().find(function(t) { return t.name === n; }) || null;
+  }
+
+  function create(data) {
+    var now = Date.now();
+    var name = String(data.name || '').trim();
+    if (!name) return null;
+    if (findByName(name)) return null; /* 同名品項不可重複 */
+    var uid = 'CAT' + now + '_' + Math.random().toString(36).slice(2, 6);
+    var c = {
+      id: uid,
+      name: name,
+      defaultPriceHK: Math.round(data.defaultPriceHK || 0),
+      category: data.category || 'other',
+      createdAt: now,
+      _fbKey: uid,
+      _updatedAt: now,
+    };
+    var arr = State.get('catalog') || [];
+    arr.push(c);
+    save(arr);
+    var obj = {}; obj[c._fbKey] = c;
+    enqueue(FB_PATH.CATALOG, obj);
+    EventBus.emit(EVENTS.CATALOG_UPDATED, c);
+    return c;
+  }
+  function update(id, patch) {
+    var arr = State.get('catalog') || [];
+    var idx = arr.findIndex(function(c) { return c.id === id; });
+    if (idx < 0) return null;
+    var merged = Object.assign({}, arr[idx], patch);
+    if (merged.defaultPriceHK !== undefined) merged.defaultPriceHK = Math.round(merged.defaultPriceHK || 0);
+    Object.assign(arr[idx], merged, { _updatedAt: Date.now() });
+    save(arr);
+    var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
+    enqueue(FB_PATH.CATALOG, obj);
+    EventBus.emit(EVENTS.CATALOG_UPDATED, arr[idx]);
+    return arr[idx];
+  }
+  function remove(id) {
+    var arr = State.get('catalog') || [];
+    var idx = arr.findIndex(function(c) { return c.id === id; });
+    if (idx < 0) return;
+    arr[idx]._deleted = true;
+    arr[idx]._updatedAt = Date.now();
+    save(arr);
+    var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
+    enqueue(FB_PATH.CATALOG, obj);
+    EventBus.emit(EVENTS.CATALOG_UPDATED, arr[idx]);
+  }
+
+  return {
+    load: load, save: save, getAll: getAll, getById: getById, findByName: findByName,
+    byCategory: byCategory, categoryLabel: categoryLabel, allCategories: allCategories,
+    fixedTickets: fixedTickets, findFixedByName: findFixedByName,
+    CATEGORY_LABELS: CATEGORY_LABELS,
+    create: create, update: update, remove: remove,
+  };
+})();
+
+
+// === src/data/auditLog.js ===
+/**
+ * data/auditLog.js — 審計紀錄（與 APP AuditLog 模組同結構，append-only）
+ * autoLog() 埋點所有 EventBus CRUD 事件；log() 供顯式記錄（登入/登出/匯出/備份）
+ * firebase 路徑 auditLog（_fbKey=audit_<id>）
+ * 依賴: core/constants.js, core/store.js, core/state.js, sync/uploader.js, core/auth.js
+ */
+var AuditLog = (function() {
+  var CRUD_MAP = [
+    { event: EVENTS.MEMBER_CREATED,      module: 'members',      action: 'create' },
+    { event: EVENTS.MEMBER_UPDATED,      module: 'members',      action: 'update' },
+    { event: EVENTS.MEMBER_DELETED,      module: 'members',      action: 'delete' },
+    { event: EVENTS.AGENT_CREATED,       module: 'agents',       action: 'create' },
+    { event: EVENTS.AGENT_UPDATED,       module: 'agents',       action: 'update' },
+    { event: EVENTS.AGENT_DELETED,       module: 'agents',       action: 'delete' },
+    { event: EVENTS.SHAREHOLDER_CREATED, module: 'shareholders', action: 'create' },
+    { event: EVENTS.SHAREHOLDER_UPDATED, module: 'shareholders', action: 'update' },
+    { event: EVENTS.SHAREHOLDER_DELETED, module: 'shareholders', action: 'delete' },
+    { event: EVENTS.TRIP_CREATED,        module: 'trips',        action: 'create' },
+    { event: EVENTS.TRIP_UPDATED,        module: 'trips',        action: 'update' },
+    { event: EVENTS.TRIP_SEALED,         module: 'trips',        action: 'seal' },
+    { event: EVENTS.MTX_CREATED,         module: 'memberTxs',    action: 'create' },
+    { event: EVENTS.MTX_UPDATED,         module: 'memberTxs',    action: 'update' },
+    { event: EVENTS.MTX_DELETED,         module: 'memberTxs',    action: 'delete' },
+    { event: EVENTS.BOOKING_CREATED,     module: 'bookings',     action: 'create' },
+    { event: EVENTS.BOOKING_UPDATED,     module: 'bookings',     action: 'update' },
+    { event: EVENTS.BOOKING_DELETED,     module: 'bookings',     action: 'delete' },
+    { event: EVENTS.SUPPLEMENT_CREATED,  module: 'supplements',  action: 'create' },
+    { event: EVENTS.SUPPLEMENT_UPDATED,  module: 'supplements',  action: 'update' },
+    { event: EVENTS.SUPPLEMENT_DELETED,  module: 'supplements',  action: 'delete' },
+    { event: EVENTS.LOAN_CREATED,        module: 'loans',        action: 'create' },
+    { event: EVENTS.LOAN_UPDATED,        module: 'loans',        action: 'update' },
+    { event: EVENTS.LOAN_DELETED,        module: 'loans',        action: 'delete' },
+    { event: EVENTS.PEXP_CREATED,        module: 'pendingExps',  action: 'create' },
+    { event: EVENTS.PEXP_UPDATED,        module: 'pendingExps',  action: 'update' },
+    { event: EVENTS.PEXP_DELETED,        module: 'pendingExps',  action: 'delete' },
+    { event: EVENTS.SETTINGS_UPDATED,    module: 'settings',     action: 'update' },
+    { event: EVENTS.HOTEL_CONFIG_UPDATED, module: 'hotelConfig', action: 'update' },
+    { event: EVENTS.CATALOG_UPDATED,     module: 'catalog',      action: 'update' },
+  ];
+
+  function load() {
+    var arr = Store.readArray(STORAGE_KEYS.AUDIT_LOG);
+    State.set('auditLog', arr);
+    return arr;
+  }
+  function save(arr) {
+    Store.writeArray(STORAGE_KEYS.AUDIT_LOG, arr || []);
+    State.set('auditLog', arr || []);
+  }
+  function getAll() {
+    return (State.get('auditLog') || []).filter(function(r) { return !r._deleted; });
+  }
+
+  function _actor() {
+    var s = (typeof Auth !== 'undefined' && Auth.getCurrent) ? Auth.getCurrent() : null;
+    if (s) return { uid: s.uid || 'system', name: s.name || '系統' };
+    return { uid: 'system', name: '系統' };
+  }
+  function _summarize(entity) {
+    if (!entity) return null;
+    try {
+      var s = JSON.stringify(entity);
+      if (s.length > 500) s = s.substring(0, 497) + '...';
+      return s;
+    } catch (e) { return String(entity); }
+  }
+
+  function _log(module, action, entityId, summary, before, after) {
+    var actor = _actor();
+    var now = Date.now();
+    var id = 'A' + now + '_' + Math.random().toString(36).substr(2, 6);
+    var record = {
+      id: id,
+      actorId: actor.uid,
+      actorName: actor.name,
+      module: module,
+      action: action,
+      entityId: entityId || '',
+      summary: summary || '',
+      before: _summarize(before),
+      after: _summarize(after),
+      at: now,
+      _fbKey: 'audit_' + id,
+      _updatedAt: now,
+    };
+    var arr = State.get('auditLog') || [];
+    arr.push(record);
+    save(arr);
+    var obj = {};
+    obj[record._fbKey] = record;
+    enqueue(FB_PATH.AUDIT_LOG, obj);
+    EventBus.emit(EVENTS.AUDIT_LOGGED, record);
+    return record;
+  }
+
+  function log(module, action, entityId, summary, before, after) {
+    return _log(module, action, entityId, summary, before, after);
+  }
+
+  /* 統一埋點：訂閱 EventBus CRUD 事件，自動產生審計記錄 */
+  function autoLog() {
+    CRUD_MAP.forEach(function(m) {
+      EventBus.on(m.event, function(entity) {
+        try {
+          var eid = entity && (entity.id || entity._fbKey) || '';
+          var label = entity && (entity.name || entity.label || entity.id || '') || '';
+          _log(m.module, m.action, eid,
+            (label ? label + ' ' : '') + m.action,
+            m.action === 'create' ? null : entity,
+            m.action === 'delete' ? null : entity);
+        } catch (e) { console.error('[AuditLog] auto', m.event, e); }
+      });
+    });
+  }
+
+  function query(f) {
+    f = f || {};
+    var kw = (f.keyword || '').trim().toLowerCase();
+    return getAll().filter(function(r) {
+      if (f.module && r.module !== f.module) return false;
+      if (f.action && r.action !== f.action) return false;
+      if (f.actorId && r.actorId !== f.actorId) return false;
+      if (kw) {
+        var hay = ((r.summary || '') + ' ' + (r.entityId || '') + ' ' + (r.actorName || '')).toLowerCase();
+        if (hay.indexOf(kw) < 0) return false;
+      }
+      return true;
+    }).sort(function(a, b) { return (b.at || 0) - (a.at || 0); });
+  }
+
+  /* 本機過期清理（保留 90 天，雲端不刪） */
+  function prune(days) {
+    var limit = Date.now() - (days || 90) * 86400000;
+    var arr = (State.get('auditLog') || []).filter(function(r) { return (r.at || 0) >= limit; });
+    if (arr.length !== (State.get('auditLog') || []).length) save(arr);
+  }
+
+  return {
+    load: load, save: save, getAll: getAll,
+    log: log, autoLog: autoLog, query: query, prune: prune,
   };
 })();
 
@@ -8103,11 +9074,22 @@ var WalletPage = (function() {
     var html = '<div class="card">';
     html += '<div class="card-header"><h3>錢包流水（會計核對）</h3></div>';
 
+    /* 未回收借支常駐警示（與 APP 一致） */
+    var openLoans = (typeof Loans !== 'undefined') ? Loans.openLoans() : [];
+    if (openLoans.length > 0) {
+      var openTotal = openLoans.reduce(function(s, l) { return s + (Loans.outstanding(l) || 0); }, 0);
+      html += '<div style="margin:8px 0 12px;padding:10px 14px;border-left:4px solid var(--warning);background:rgba(217,119,6,.08);border-radius:6px;">';
+      html += '⚠ <b>未回收借支 ' + openLoans.length + ' 筆，合計 HK$ ' + fmtHK(openTotal) + '</b>';
+      html += ' <button class="btn-sm" style="margin-left:8px;" onclick="WalletPage._tab(\'loans\')">查看</button>';
+      html += '</div>';
+    }
+
     /* 分頁切換 */
     html += '<div class="filter-bar" style="margin-bottom:12px;">';
     html += '<button class="filter-btn' + (_tab === 'wallet' ? ' active' : '') + '" onclick="WalletPage._tab(\'wallet\')">錢包流水</button>';
     html += '<button class="filter-btn' + (_tab === 'loans' ? ' active' : '') + '" onclick="WalletPage._tab(\'loans\')">借支</button>';
     html += '<button class="filter-btn' + (_tab === 'pendExps' ? ' active' : '') + '" onclick="WalletPage._tab(\'pendExps\')">預支開銷</button>';
+    html += '<button class="filter-btn" style="margin-left:auto;" onclick="WalletPage.showCatalog()">⚙ 品項設定</button>';
     html += '</div>';
 
     if (_tab === 'wallet') html += _renderWallet();
@@ -8187,6 +9169,11 @@ var WalletPage = (function() {
 
     var html = '';
 
+    /* 登記借支按鈕 */
+    html += '<div style="margin-bottom:12px;text-align:right;">';
+    html += '<button class="btn btn-primary" onclick="WalletPage.showAddLoan()">＋ 登記借支</button>';
+    html += '</div>';
+
     html += '<div class="kpi-grid" style="margin-bottom:16px;">';
     html += '<div class="kpi-card highlight"><div class="kpi-label">未回收合計(HK$)</div><div class="kpi-value">' + fmtHK(totalLent - totalRepaid) + '</div></div>';
     html += '<div class="kpi-card normal"><div class="kpi-label">借出合計</div><div class="kpi-value">' + fmtHK(totalLent) + '</div></div>';
@@ -8195,21 +9182,22 @@ var WalletPage = (function() {
     html += '</div>';
 
     if (loans.length === 0) {
-      html += '<div class="empty-state">無借支記錄</div>';
+      html += '<div class="empty-state">無借支記錄，點「登記借支」新增</div>';
       return html;
     }
 
     html += '<div class="table-wrapper"><table class="data-table"><thead><tr>';
-    html += '<th>日期</th><th>會員</th><th class="num">借支金額</th><th class="num">已回收</th><th class="num">未回收</th><th>回收明細</th><th>備註</th>';
+    html += '<th>日期</th><th>會員</th><th class="num">借支金額</th><th class="num">已回收</th><th class="num">未回收</th><th>回收明細</th><th>備註</th><th>操作</th>';
     html += '</tr></thead><tbody>';
 
     loans.forEach(function(l) {
       var lent = l.amountHKD || 0;
       var repaid = (l.repayments || []).reduce(function(s, r) { return s + (r.amountHKD || 0); }, 0);
       var outstanding = lent - repaid;
-      var repayDetail = (l.repayments || []).map(function(r) {
-        return (r.date || '') + ': ' + fmtHK(r.amountHKD) + (r.note ? ' (' + r.note + ')' : '');
-      }).join('; ');
+      var repayDetail = (l.repayments || []).map(function(r, i) {
+        return (r.date || '') + ': ' + fmtHK(r.amountHKD) + (r.note ? ' (' + r.note + ')' : '')
+          + ' <a href="javascript:void(0)" style="color:var(--danger);" onclick="WalletPage.deleteRepayRow(\'' + escHtml(l.id) + '\',' + i + ')" title="刪除此筆回收">×</a>';
+      }).join('<br>');
 
       html += '<tr>';
       html += '<td>' + escHtml(l.date || '') + '</td>';
@@ -8217,8 +9205,15 @@ var WalletPage = (function() {
       html += '<td class="num">' + fmtHK(lent) + '</td>';
       html += '<td class="num" style="color:var(--success);">' + fmtHK(repaid) + '</td>';
       html += '<td class="num" style="' + (outstanding > 0 ? 'color:var(--danger);font-weight:600;' : '') + '">' + fmtHK(outstanding) + '</td>';
-      html += '<td style="font-size:var(--font-size-sm);">' + escHtml(repayDetail) + '</td>';
+      html += '<td style="font-size:var(--font-size-sm);">' + repayDetail + '</td>';
       html += '<td>' + escHtml(l.note || '') + '</td>';
+      html += '<td style="white-space:nowrap;">';
+      html += '<button class="btn-sm" onclick="WalletPage.showEditLoan(\'' + escHtml(l.id) + '\')">編</button> ';
+      if (outstanding > 0) {
+        html += '<button class="btn-sm btn-primary" onclick="WalletPage.repayLoan(\'' + escHtml(l.id) + '\')">回收</button> ';
+      }
+      html += '<button class="btn-sm btn-danger" onclick="WalletPage.deleteLoan(\'' + escHtml(l.id) + '\')">刪</button>';
+      html += '</td>';
       html += '</tr>';
     });
 
@@ -8237,6 +9232,11 @@ var WalletPage = (function() {
 
     var html = '';
 
+    /* 新增預支按鈕 */
+    html += '<div style="margin-bottom:12px;text-align:right;">';
+    html += '<button class="btn btn-primary" onclick="WalletPage.showAddPendExp()">＋ 新增預支開銷</button>';
+    html += '</div>';
+
     html += '<div class="kpi-grid" style="margin-bottom:16px;">';
     html += '<div class="kpi-card highlight"><div class="kpi-label">開銷合計(HK$)</div><div class="kpi-value">' + fmtHK(totalAmount) + '</div></div>';
     html += '<div class="kpi-card normal"><div class="kpi-label">預支單數</div><div class="kpi-value">' + exps.length + '</div></div>';
@@ -8244,16 +9244,27 @@ var WalletPage = (function() {
     html += '</div>';
 
     if (exps.length === 0) {
-      html += '<div class="empty-state">無預支開銷記錄</div>';
+      html += '<div class="empty-state">無預支開銷記錄，點「新增預支開銷」新增</div>';
       return html;
     }
 
     exps.forEach(function(e) {
       var rowsTotal = (e.rows || []).reduce(function(s, r) { return s + (r.amountHK || 0); }, 0);
+      /* 已歸屬資訊（被帳務 fromPend 帶入的數量） */
+      var claimedHtml = '';
+      if (typeof PendExps !== 'undefined' && PendExps.isClaimed(e)) {
+        var info = PendExps.claimInfo(e);
+        var claimedCount = info.filter(function(x) { return x.claimed > 0; }).length;
+        claimedHtml = '<span style="color:var(--success);font-size:var(--font-size-sm);">（已歸屬 ' + claimedCount + ' 行）</span>';
+      }
       html += '<div class="card" style="margin-bottom:8px;">';
       html += '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">';
-      html += '<span>' + escHtml(e.date || '') + ' — ' + escHtml(tripLabel(e.tripId)) + '</span>';
+      html += '<span>' + escHtml(e.date || '') + ' — ' + escHtml(tripLabel(e.tripId)) + ' ' + claimedHtml + '</span>';
+      html += '<span style="display:flex;align-items:center;gap:8px;">';
       html += '<span class="num" style="font-weight:600;">HK$ ' + fmtHK(rowsTotal) + '</span>';
+      html += '<button class="btn-sm" onclick="WalletPage.showEditPendExp(\'' + escHtml(e.id) + '\')">編</button> ';
+      html += '<button class="btn-sm btn-danger" onclick="WalletPage.deletePendExp(\'' + escHtml(e.id) + '\')">刪</button>';
+      html += '</span>';
       html += '</div>';
 
       if (e.rows && e.rows.length > 0) {
@@ -8379,6 +9390,355 @@ var WalletPage = (function() {
     });
   }
 
+  /* ===== 借支 CRUD（與 APP WalletPage 借支面板同操作） ===== */
+  function showAddLoan() {
+    var html = '';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>會員</label><select id="loan-member" class="form-input">' + memberOptions('') + '</select></div>';
+    html += '<div class="form-group"><label>日期</label><input type="date" id="loan-date" class="form-input" value="' + todayStr() + '"></div>';
+    html += '</div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>借支金額(HK$)</label><input type="number" id="loan-amount" class="form-input" step="1" min="1" placeholder="如: 30000"></div>';
+    html += '<div class="form-group"><label>備註</label><input type="text" id="loan-note" class="form-input" placeholder="選填"></div>';
+    html += '</div>';
+    html += '<div style="font-size:var(--font-size-sm);color:var(--text-muted);margin:4px 0 8px;">借出即從錢包扣除；回收時逐筆加回。</div>';
+    html += '<div style="text-align:right;margin-top:12px;">';
+    html += '<button class="btn btn-secondary" onclick="Modal.close()">取消</button> ';
+    html += '<button class="btn btn-primary" id="loan-save-btn">登記</button>';
+    html += '</div>';
+    Modal.open('借支登記', html);
+    setTimeout(function() {
+      var btn = document.getElementById('loan-save-btn');
+      if (btn) btn.onclick = saveLoan;
+    }, 50);
+  }
+
+  function saveLoan() {
+    var memberId = document.getElementById('loan-member').value;
+    var date = document.getElementById('loan-date').value.trim();
+    var amount = parseFloat(document.getElementById('loan-amount').value);
+    var note = document.getElementById('loan-note').value.trim();
+    if (!memberId) { Toast.warning('請選會員'); return; }
+    if (isNaN(amount) || amount <= 0) { Toast.warning('請填借支金額'); return; }
+    var l = Loans.create({ memberId: memberId, date: date, amountHKD: amount, note: note });
+    if (!l) { Toast.error('登記失敗'); return; }
+    Modal.close();
+    Toast.success('借支已登記，錢包已扣 HK$ ' + fmtHK(amount));
+    render();
+  }
+
+  function showEditLoan(id) {
+    var l = Loans.getById(id);
+    if (!l) return;
+    var repaid = Loans.repaidTotal(l);
+    var html = '';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>會員</label><select id="loan-member" class="form-input">' + memberOptions(l.memberId) + '</select></div>';
+    html += '<div class="form-group"><label>日期</label><input type="date" id="loan-date" class="form-input" value="' + escHtml(l.date || '') + '"></div>';
+    html += '</div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>借支金額(HK$)</label><input type="number" id="loan-amount" class="form-input" step="1" min="' + repaid + '" value="' + (l.amountHKD || 0) + '"></div>';
+    html += '<div class="form-group"><label>備註</label><input type="text" id="loan-note" class="form-input" value="' + escHtml(l.note || '') + '"></div>';
+    html += '</div>';
+    if (repaid > 0) {
+      html += '<div style="font-size:var(--font-size-sm);color:var(--warning);">已回收 HK$ ' + fmtHK(repaid) + '，借支金額不可低於已回收總額。</div>';
+    }
+    html += '<div style="text-align:right;margin-top:12px;">';
+    html += '<button class="btn btn-secondary" onclick="Modal.close()">取消</button> ';
+    html += '<button class="btn btn-primary" id="loan-edit-btn">儲存</button>';
+    html += '</div>';
+    Modal.open('編輯借支', html);
+    setTimeout(function() {
+      var btn = document.getElementById('loan-edit-btn');
+      if (btn) btn.onclick = function() { _saveEditLoan(id); };
+    }, 50);
+  }
+
+  function _saveEditLoan(id) {
+    var memberId = document.getElementById('loan-member').value;
+    var date = document.getElementById('loan-date').value.trim();
+    var amount = parseFloat(document.getElementById('loan-amount').value);
+    var note = document.getElementById('loan-note').value.trim();
+    if (!memberId) { Toast.warning('請選會員'); return; }
+    if (isNaN(amount) || amount <= 0) { Toast.warning('請填借支金額'); return; }
+    var l = Loans.update(id, { memberId: memberId, date: date, amountHKD: amount, note: note });
+    if (!l) { Toast.error('儲存失敗：借支金額不可低於已回收總額'); return; }
+    Modal.close();
+    Toast.success('借支已更新');
+    render();
+  }
+
+  function repayLoan(id) {
+    var l = Loans.getById(id);
+    if (!l) return;
+    var max = Loans.outstanding(l);
+    var html = '';
+    html += '<div style="margin-bottom:12px;font-size:var(--font-size-sm);color:var(--text-muted);">';
+    html += escHtml(memberName(l.memberId)) + '｜借 ' + fmtHK(l.amountHKD || 0) + '｜尚欠 <b style="color:var(--danger);">' + fmtHK(max) + '</b>';
+    html += '</div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>回收金額(HK$)</label><input type="number" id="repay-amount" class="form-input" step="1" min="1" max="' + max + '" value="' + max + '"></div>';
+    html += '<div class="form-group"><label>日期</label><input type="date" id="repay-date" class="form-input" value="' + todayStr() + '"></div>';
+    html += '</div>';
+    html += '<div class="form-group"><label>備註</label><input type="text" id="repay-note" class="form-input" placeholder="選填"></div>';
+    html += '<div style="text-align:right;margin-top:12px;">';
+    html += '<button class="btn btn-secondary" onclick="Modal.close()">取消</button> ';
+    html += '<button class="btn btn-primary" id="repay-save-btn">回收</button>';
+    html += '</div>';
+    Modal.open('借支回收', html);
+    setTimeout(function() {
+      var btn = document.getElementById('repay-save-btn');
+      if (btn) btn.onclick = function() { _saveRepay(id); };
+    }, 50);
+  }
+
+  function _saveRepay(id) {
+    var amount = parseFloat(document.getElementById('repay-amount').value);
+    var date = document.getElementById('repay-date').value.trim();
+    var note = document.getElementById('repay-note').value.trim();
+    if (isNaN(amount) || amount <= 0) { Toast.warning('請填回收金額'); return; }
+    var l = Loans.repay(id, amount, date, note);
+    if (!l) { Toast.error('回收失敗'); return; }
+    Modal.close();
+    Toast.success('已回收 HK$ ' + fmtHK(Math.min(amount, Loans.repaidTotal(l) - (l.repayments || []).slice(0, -1).reduce(function(s, r) { return s + (r.amountHKD || 0); }, 0))));
+    render();
+  }
+
+  function deleteLoan(id) {
+    var l = Loans.getById(id);
+    if (!l) return;
+    var outstanding = Loans.outstanding(l);
+    var msg = '確定刪除 ' + escHtml(memberName(l.memberId)) + ' 的借支 ' + fmtHK(l.amountHKD || 0) + '（未回收 ' + fmtHK(outstanding) + '）？\n錢包對應的借支/回收流水會一併移除。';
+    Modal.confirm(msg, function() {
+      Loans.remove(id);
+      Toast.success('已刪除借支');
+      render();
+    });
+  }
+
+  function deleteRepayRow(loanId, idx) {
+    Modal.confirm('確定刪除第 ' + (idx + 1) + ' 筆回收記錄？錢包回收流水會同步調整。', function() {
+      Loans.removeRepayment(loanId, idx);
+      Toast.success('已刪除該筆回收');
+      render();
+    });
+  }
+
+  /* ===== 預支開銷 CRUD ===== */
+  var _pendRows = []; /* 暫存編輯中的 rows：[{name, quantity, unitPrice, payout}] */
+
+  function _catalogDatalist() {
+    var html = '<datalist id="pend-item-list">';
+    (typeof Catalog !== 'undefined' ? Catalog.fixedTickets() : []).forEach(function(t) {
+      html += '<option value="' + escHtml(t.name) + '" data-price="' + (t.ourPrice || 0) + '">';
+    });
+    (typeof Catalog !== 'undefined' ? Catalog.getAll() : []).forEach(function(c) {
+      html += '<option value="' + escHtml(c.name) + '" data-price="' + (c.defaultPriceHK || 0) + '">';
+    });
+    html += '</datalist>';
+    return html;
+  }
+
+  function _renderPendRows() {
+    var html = '<div id="pend-rows-box">';
+    _pendRows.forEach(function(r, i) {
+      html += '<div class="form-row" style="align-items:flex-end;" id="pend-row-' + i + '">';
+      html += '<div class="form-group" style="flex:2;"><label>品名</label><input type="text" class="form-input pend-name" list="pend-item-list" value="' + escHtml(r.name || '') + '" oninput="WalletPage._pendRowChange(' + i + ',\'name\',this.value)" placeholder="可選品項或自行輸入"></div>';
+      html += '<div class="form-group"><label>數量</label><input type="number" class="form-input" min="1" value="' + (r.quantity || 1) + '" oninput="WalletPage._pendRowChange(' + i + ',\'quantity\',this.value)"></div>';
+      html += '<div class="form-group"><label>單價(HK$)</label><input type="number" class="form-input" min="0" step="1" value="' + (r.unitPrice || 0) + '" oninput="WalletPage._pendRowChange(' + i + ',\'unitPrice\',this.value)"></div>';
+      html += '<div class="form-group"><label>實支(HK$)</label><input type="number" class="form-input" min="0" step="1" value="' + (r.payout || 0) + '" oninput="WalletPage._pendRowChange(' + i + ',\'payout\',this.value)" title="實際支付金額（0=同單價）"></div>';
+      html += '<div class="form-group"><button class="btn-sm btn-danger" onclick="WalletPage._delPendRow(' + i + ')">×</button></div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function _pendRowChange(i, k, v) {
+    if (!_pendRows[i]) return;
+    if (k === 'quantity' || k === 'unitPrice' || k === 'payout') {
+      _pendRows[i][k] = parseFloat(v) || 0;
+    } else {
+      _pendRows[i][k] = v;
+      /* 品項名帶入預設單價 */
+      var fixed = (typeof Catalog !== 'undefined') ? Catalog.findFixedByName(v) : null;
+      var cat = fixed ? null : ((typeof Catalog !== 'undefined') ? Catalog.findByName(v) : null);
+      var price = fixed ? (fixed.ourPrice || 0) : (cat ? (cat.defaultPriceHK || 0) : null);
+      if (price !== null && (!_pendRows[i].unitPrice || _pendRows[i].unitPrice === 0)) {
+        _pendRows[i].unitPrice = price;
+        var box = document.getElementById('pend-rows-box');
+        if (box) box.innerHTML = _renderPendRows();
+      }
+    }
+  }
+
+  function _delPendRow(i) {
+    _pendRows.splice(i, 1);
+    var box = document.getElementById('pend-rows-box');
+    if (box) box.innerHTML = _renderPendRows();
+  }
+
+  function _addPendRow(row) {
+    _pendRows.push(row || { name: '', quantity: 1, unitPrice: 0, payout: 0 });
+    var box = document.getElementById('pend-rows-box');
+    if (box) box.innerHTML = _renderPendRows();
+  }
+
+  function _pendExpForm(e) {
+    var p = e || {};
+    var html = '';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>團</label><select id="pexp-trip" class="form-input">' + tripOptions(p.tripId) + '</select></div>';
+    html += '<div class="form-group"><label>日期</label><input type="date" id="pexp-date" class="form-input" value="' + escHtml(p.date || todayStr()) + '"></div>';
+    html += '</div>';
+    html += '<div class="form-group"><label>備註</label><input type="text" id="pexp-note" class="form-input" value="' + escHtml(p.note || '') + '" placeholder="選填"></div>';
+    html += _catalogDatalist();
+    html += '<div style="font-weight:600;margin:10px 0 6px;">開銷明細</div>';
+    html += _renderPendRows();
+    html += '<button class="btn-sm" onclick="WalletPage._addPendRow()">＋ 加一行</button>';
+    html += '<div style="text-align:right;margin-top:12px;">';
+    html += '<button class="btn btn-secondary" onclick="Modal.close()">取消</button> ';
+    html += '<button class="btn btn-primary" id="pexp-save-btn">儲存</button>';
+    html += '</div>';
+    return html;
+  }
+
+  function showAddPendExp() {
+    _editingId = null;
+    _pendRows = [{ name: '', quantity: 1, unitPrice: 0, payout: 0 }];
+    Modal.open('新增預支開銷', _pendExpForm(null));
+    setTimeout(function() {
+      var btn = document.getElementById('pexp-save-btn');
+      if (btn) btn.onclick = savePendExp;
+    }, 50);
+  }
+
+  function showEditPendExp(id) {
+    var p = PendExps.getById(id);
+    if (!p) return;
+    if (PendExps.isClaimed(p)) {
+      Toast.warning('此預支單已被帳務帶入（fromPend），請先從帳務移除相關行再編輯');
+    }
+    _editingId = id;
+    _pendRows = (p.rows || []).map(function(r) {
+      var qty = r.quantity || 1;
+      return { name: r.name || '', quantity: qty, unitPrice: r.unitPrice || (qty > 0 ? (r.amountHK || 0) / qty : 0), payout: r.payout || 0 };
+    });
+    Modal.open('編輯預支開銷', _pendExpForm(p));
+    setTimeout(function() {
+      var btn = document.getElementById('pexp-save-btn');
+      if (btn) btn.onclick = savePendExp;
+    }, 50);
+  }
+
+  function savePendExp() {
+    var tripId = document.getElementById('pexp-trip').value;
+    var date = document.getElementById('pexp-date').value.trim();
+    var note = document.getElementById('pexp-note').value.trim();
+    if (!tripId) { Toast.warning('請選團'); return; }
+    var rows = _pendRows.filter(function(r) { return (r.name || '').trim(); });
+    if (rows.length === 0) { Toast.warning('請至少填一行開銷明細'); return; }
+    var data = {
+      tripId: tripId, date: date, note: note,
+      rows: rows.map(function(r) {
+        var qty = Math.max(1, Math.round(r.quantity || 1));
+        return {
+          name: String(r.name).trim(),
+          quantity: qty,
+          unitPrice: Math.round(r.unitPrice || 0),
+          amountHK: Math.round((r.unitPrice || 0) * qty),
+          payout: r.payout ? Math.round(r.payout) : 0,
+        };
+      }),
+    };
+    if (_editingId) {
+      var updated = PendExps.update(_editingId, data);
+      if (!updated) { Toast.error('更新失敗'); return; }
+      Toast.success('預支開銷已更新');
+    } else {
+      var trip = (State.get('trips') || []).find(function(t) { return t.id === tripId; });
+      data.agentId = trip ? trip.agentId : '';
+      data.shareholderId = trip ? trip.shareholderId : '';
+      if (!PendExps.create(data)) { Toast.error('建立失敗'); return; }
+      Toast.success('預支開銷已登記，錢包已同步扣款');
+    }
+    _editingId = null;
+    Modal.close();
+    render();
+  }
+
+  function deletePendExp(id) {
+    var p = PendExps.getById(id);
+    if (!p) return;
+    if (PendExps.isClaimed(p)) {
+      Toast.error('此預支單已被帳務帶入，不可刪除。請先從帳務移除相關開銷行。');
+      return;
+    }
+    Modal.confirm('確定刪除 ' + (p.date || '') + ' 的預支開銷單？錢包對應流水會一併移除。', function() {
+      PendExps.remove(id);
+      Toast.success('已刪除');
+      render();
+    });
+  }
+
+  /* ===== 品項設定（Catalog CRUD） ===== */
+  function showCatalog() {
+    var html = '';
+    html += '<div style="margin-bottom:10px;font-size:var(--font-size-sm);color:var(--text-muted);">水舞間/水上樂園價格吃「系統設定 → 門票預設價格」，此處管理其他品項。</div>';
+    html += '<div class="form-row" style="align-items:flex-end;">';
+    html += '<div class="form-group" style="flex:2;"><label>品名</label><input type="text" id="cat-name" class="form-input" placeholder="如: 摩珀斯酒店 - 餐飲券"></div>';
+    html += '<div class="form-group"><label>分類</label><select id="cat-category" class="form-input">';
+    var cats = (typeof Catalog !== 'undefined') ? Catalog.allCategories() : [];
+    ['show', 'park', 'tower', 'transport', 'food', 'hotel', 'other'].forEach(function(c) {
+      if (cats.indexOf(c) < 0) cats.push(c);
+    });
+    cats.forEach(function(c) {
+      html += '<option value="' + c + '">' + Catalog.categoryLabel(c) + '</option>';
+    });
+    html += '</select></div>';
+    html += '<div class="form-group"><label>預設單價(HK$)</label><input type="number" id="cat-price" class="form-input" min="0" step="1" value="0"></div>';
+    html += '<div class="form-group"><button class="btn btn-primary btn-sm" onclick="WalletPage.saveCatalogItem()">新增</button></div>';
+    html += '</div>';
+
+    var items = (typeof Catalog !== 'undefined') ? Catalog.getAll() : [];
+    html += '<div class="table-wrapper"><table class="data-table"><thead><tr>';
+    html += '<th>品名</th><th>分類</th><th class="num">預設單價(HK$)</th><th>操作</th>';
+    html += '</tr></thead><tbody>';
+    items.forEach(function(c) {
+      html += '<tr>';
+      html += '<td>' + escHtml(c.name || '') + '</td>';
+      html += '<td>' + escHtml(Catalog.categoryLabel(c.category)) + '</td>';
+      html += '<td class="num">' + fmtHK(c.defaultPriceHK || 0) + '</td>';
+      html += '<td><button class="btn-sm btn-danger" onclick="WalletPage.deleteCatalogItem(\'' + escHtml(c.id) + '\')">刪</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+    Modal.open('品項設定', html);
+  }
+
+  function saveCatalogItem() {
+    var name = document.getElementById('cat-name').value.trim();
+    var category = document.getElementById('cat-category').value;
+    var price = parseFloat(document.getElementById('cat-price').value) || 0;
+    if (!name) { Toast.warning('請填品名'); return; }
+    if (!Catalog.create({ name: name, category: category, defaultPriceHK: price })) {
+      Toast.error('新增失敗：品名可能重複');
+      return;
+    }
+    Toast.success('已新增品項');
+    showCatalog();
+  }
+
+  function deleteCatalogItem(id) {
+    var c = Catalog.getById(id);
+    if (!c) return;
+    Modal.confirm('確定刪除品項「' + escHtml(c.name) + '」？既有預支/帳務記錄不受影響。', function() {
+      Catalog.remove(id);
+      Toast.success('已刪除');
+      showCatalog();
+    });
+  }
+
   return {
     render: render,
     _tab: setTab,
@@ -8386,6 +9746,322 @@ var WalletPage = (function() {
     showEditWalletTx: showEditWalletTx,
     saveWalletTx: saveWalletTx,
     deleteWalletTx: deleteWalletTx,
+    showAddLoan: showAddLoan,
+    showEditLoan: showEditLoan,
+    repayLoan: repayLoan,
+    deleteLoan: deleteLoan,
+    deleteRepayRow: deleteRepayRow,
+    showAddPendExp: showAddPendExp,
+    showEditPendExp: showEditPendExp,
+    deletePendExp: deletePendExp,
+    _addPendRow: _addPendRow,
+    _delPendRow: _delPendRow,
+    _pendRowChange: _pendRowChange,
+    showCatalog: showCatalog,
+    saveCatalogItem: saveCatalogItem,
+    deleteCatalogItem: deleteCatalogItem,
+  };
+})();
+
+
+// === src/pages/reports.js ===
+/**
+ * pages/reports.js — 報表中心（與 APP ReportsPage 對齊）
+ * 團選擇 → PDF 匯出（代理明細/股東全覽）＋ 數據備份 ＋ 快覽統計
+ * 依赖: core/state.js, data/trips.js, ui/modal.js, ui/toast.js, ui/pdfExport.js
+ */
+var ReportsPage = (function() {
+  var _selectedTrip = '';
+
+  function escHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function tripDisplayName(t) {
+    var bits = [t.id];
+    if (t.label) bits.push(t.label);
+    if (t.visitDate) bits.push(t.visitDate);
+    if (t.hotelNote) bits.push(t.hotelNote);
+    if (t.notes) bits.push(t.notes);
+    return bits.join(' ');
+  }
+
+  function render() {
+    var trips = (State.get('trips') || []).filter(function(t) { return !t._deleted; });
+    var ST_ORDER = { active: 0, pending_settlement: 1, sealed: 2 };
+    var ST_LABEL = { active: '進行中', pending_settlement: '待結帳', sealed: '已封存' };
+    var allTrips = trips.slice().sort(function(a, b) {
+      var oa = ST_ORDER[a.status] !== undefined ? ST_ORDER[a.status] : 3;
+      var ob = ST_ORDER[b.status] !== undefined ? ST_ORDER[b.status] : 3;
+      if (oa !== ob) return oa - ob;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+
+    var html = '';
+    html += '<div class="card mb-md">';
+    html += '<div class="card-header"><h3>選擇團（匯出範圍）</h3></div>';
+    html += '<div class="card-body">';
+    html += '<select id="rpt-trip-select" class="form-input" onchange="ReportsPage.selectTrip(this.value)">';
+    html += '<option value="">全部團</option>';
+    allTrips.forEach(function(t) {
+      var label = tripDisplayName(t) + '（' + (ST_LABEL[t.status] || t.status) + '）';
+      html += '<option value="' + escHtml(t.id) + '"' + (_selectedTrip === t.id ? ' selected' : '') + '>' + escHtml(label) + '</option>';
+    });
+    html += '</select>';
+    html += '</div></div>';
+
+    html += '<div class="card mb-md">';
+    html += '<div class="card-header"><h3>PDF 報表</h3></div>';
+    html += '<div class="card-body">';
+    html += '<div class="reports-grid">';
+    html += '<div class="rpt-card" onclick="ReportsPage.exportAgentList()">';
+    html += '<div class="rpt-icon">📋</div>';
+    html += '<div class="rpt-info"><div class="rpt-title">代理明細</div><div class="rpt-desc">各代理的會員帳卡明細 + 房間記錄</div></div>';
+    html += '<div class="rpt-arrow">›</div>';
+    html += '</div>';
+    html += '<div class="rpt-card" onclick="ReportsPage.exportShareholderList()">';
+    html += '<div class="rpt-icon">📊</div>';
+    html += '<div class="rpt-info"><div class="rpt-title">股東全覽</div><div class="rpt-desc">全部代理明細彙整（按股東分組）</div></div>';
+    html += '<div class="rpt-arrow">›</div>';
+    html += '</div>';
+    html += '</div></div></div>';
+
+    html += '<div class="card mb-md">';
+    html += '<div class="card-header"><h3>數據備份</h3></div>';
+    html += '<div class="card-body">';
+    html += '<div class="reports-grid">';
+    html += '<div class="rpt-card" onclick="ReportsPage.exportBackup()">';
+    html += '<div class="rpt-icon">💾</div>';
+    html += '<div class="rpt-info"><div class="rpt-title">匯出備份</div><div class="rpt-desc">全部資料打包匯出（JSON 檔）</div></div>';
+    html += '<div class="rpt-arrow">›</div>';
+    html += '</div>';
+    html += '</div></div></div>';
+
+    var agents = (State.get('agents') || []).filter(function(a) { return !a._deleted; });
+    var shareholders = (State.get('shareholders') || []).filter(function(s) { return !s._deleted; });
+    var mtxs = (State.get('memberTxs') || []).filter(function(t) { return !t._deleted; });
+    var bookings = (State.get('bookings') || []).filter(function(b) { return !b._deleted; });
+    var tripTxs = _selectedTrip ? mtxs.filter(function(t) { return t.tripId === _selectedTrip; }) : mtxs;
+    var tripBookings = _selectedTrip ? bookings.filter(function(b) { return b.tripId === _selectedTrip; }) : bookings;
+    var totalWash = tripTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
+
+    html += '<div class="card">';
+    html += '<div class="card-header"><h3>快覽統計' + (_selectedTrip ? '（團 ' + escHtml(_selectedTrip) + '）' : '（全部團）') + '</h3></div>';
+    html += '<div class="card-body">';
+    html += '<div class="rpt-stats">';
+    html += '<div class="rpt-stat-item"><span class="rpt-stat-val">' + agents.length + '</span><span class="rpt-stat-label">代理</span></div>';
+    html += '<div class="rpt-stat-item"><span class="rpt-stat-val">' + shareholders.length + '</span><span class="rpt-stat-label">股東</span></div>';
+    html += '<div class="rpt-stat-item"><span class="rpt-stat-val">' + tripTxs.length + '</span><span class="rpt-stat-label">交易</span></div>';
+    html += '<div class="rpt-stat-item"><span class="rpt-stat-val">' + tripBookings.length + '</span><span class="rpt-stat-label">訂房</span></div>';
+    html += '<div class="rpt-stat-item"><span class="rpt-stat-val">' + totalWash.toFixed(1) + '</span><span class="rpt-stat-label">洗碼(萬)</span></div>';
+    html += '</div></div></div>';
+
+    document.getElementById('page-reports').innerHTML = html;
+  }
+
+  function selectTrip(tripId) {
+    _selectedTrip = tripId || '';
+    render();
+  }
+
+  function exportAgentList() {
+    if (_selectedTrip) {
+      var trip = (State.get('trips') || []).find(function(t) { return t.id === _selectedTrip; });
+      if (trip && trip.agentId) {
+        PdfExport.exportAgent(trip.agentId, _selectedTrip);
+        if (typeof AuditLog !== 'undefined') AuditLog.log('backup', 'export', trip.id, '匯出代理明細 PDF（' + trip.id + '）');
+        return;
+      }
+    }
+    Toast.info('請從帳務頁選擇代理後匯出，或選擇特定團');
+  }
+
+  function exportShareholderList() {
+    PdfExport.exportShareholder(_selectedTrip || undefined);
+    if (typeof AuditLog !== 'undefined') AuditLog.log('backup', 'export', _selectedTrip || 'all', '匯出股東全覽 PDF');
+  }
+
+  function exportBackup() {
+    var keys = [
+      { key: STORAGE_KEYS.MEMBERS, name: 'members' },
+      { key: STORAGE_KEYS.AGENTS, name: 'agents' },
+      { key: STORAGE_KEYS.SHAREHOLDERS, name: 'shareholders' },
+      { key: STORAGE_KEYS.TRIPS, name: 'trips' },
+      { key: STORAGE_KEYS.MEMBER_TXS, name: 'memberTxs' },
+      { key: STORAGE_KEYS.BOOKINGS, name: 'bookings' },
+      { key: STORAGE_KEYS.SUPPLEMENTS, name: 'supplements' },
+      { key: STORAGE_KEYS.SETTINGS, name: 'settings' },
+      { key: STORAGE_KEYS.EXTRA_INCOME, name: 'extraIncome' },
+      { key: STORAGE_KEYS.HOTEL_CONFIG, name: 'hotelConfig' },
+      { key: STORAGE_KEYS.WALLET_TXS, name: 'walletTxs' },
+      { key: STORAGE_KEYS.LOANS, name: 'loans' },
+      { key: STORAGE_KEYS.PENDING_EXPS, name: 'pendingExps' },
+      { key: STORAGE_KEYS.CATALOG, name: 'catalog' },
+      { key: STORAGE_KEYS.EMPLOYEE_LIST, name: 'employeeList' },
+    ];
+    var data = { _exportedAt: new Date().toISOString(), _version: 'tw-web-1.5.0' };
+    keys.forEach(function(k) {
+      try { data[k.name] = JSON.parse(localStorage.getItem(k.key) || 'null'); } catch (e) { data[k.name] = null; }
+    });
+    var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'tw-backup-' + todayStr() + '.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    Toast.success('備份已匯出');
+    if (typeof AuditLog !== 'undefined') AuditLog.log('backup', 'export', '', '匯出全部資料備份');
+  }
+
+  return {
+    render: render,
+    selectTrip: selectTrip,
+    exportAgentList: exportAgentList,
+    exportShareholderList: exportShareholderList,
+    exportBackup: exportBackup,
+  };
+})();
+
+
+// === src/pages/auditLog.js ===
+/**
+ * pages/auditLog.js — 審計紀錄查詢頁（與 APP AuditLogPage 對齊）
+ * 按模組/動作/操作者/關鍵字篩選；管理員限定（Perm 把關）
+ * 依赖: core/constants.js, data/auditLog.js, core/permissions.js
+ */
+var AuditLogPage = (function() {
+  var _filters = { module: '', action: '', actorId: '', keyword: '' };
+
+  var MODULE_LABELS = {
+    members: '會員', agents: '代理', shareholders: '股東', trips: '團務',
+    memberTxs: '會員交易', bookings: '訂房', supplements: '補充',
+    settings: '系統設定', hotelConfig: '酒店設定', users: '帳號',
+    auth: '登入', backup: '備份', auditLog: '審計',
+    loans: '借支', pendingExps: '預支開銷', catalog: '品項',
+  };
+
+  var ACTION_LABELS = {
+    create: '新增', update: '修改', delete: '刪除', seal: '封存',
+    login: '登入', logout: '登出', setup: '初始設定',
+    export: '匯出', import: '匯入', unlockArchived: '解封',
+  };
+
+  function escHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function _fmtTime(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    var hh = String(d.getHours()).padStart(2, '0');
+    var mm = String(d.getMinutes()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + dd + ' ' + hh + ':' + mm;
+  }
+
+  function _actionColor(action) {
+    if (action === 'create') return 'var(--success)';
+    if (action === 'delete') return 'var(--danger)';
+    if (action === 'login' || action === 'logout') return 'var(--info)';
+    if (action === 'export' || action === 'import') return 'var(--warning)';
+    return 'inherit';
+  }
+
+  function render() {
+    var container = document.getElementById('page-audit-log');
+    if (!container) return;
+
+    if (typeof Perm !== 'undefined' && Perm.hasSession() && !Perm.can('auditLog', 'read')) {
+      container.innerHTML = '<div class="card"><p>您無權限查看審計紀錄</p></div>';
+      return;
+    }
+
+    var records = AuditLog.query({
+      module: _filters.module || undefined,
+      action: _filters.action || undefined,
+      actorId: _filters.actorId || undefined,
+      keyword: _filters.keyword || undefined,
+    });
+
+    var html = '<div class="card">';
+    html += '<div class="card-header"><h3>審計紀錄</h3>';
+    html += '<span style="float:right;font-size:12px;color:var(--text-muted);">共 ' + records.length + ' 筆</span>';
+    html += '</div>';
+
+    html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">';
+    html += '<select id="audit-filter-module" class="form-input" style="width:auto;" onchange="AuditLogPage.setFilter(\'module\', this.value)">';
+    html += '<option value="">全部模組</option>';
+    Object.keys(MODULE_LABELS).forEach(function(k) {
+      html += '<option value="' + k + '"' + (_filters.module === k ? ' selected' : '') + '>' + MODULE_LABELS[k] + '</option>';
+    });
+    html += '</select>';
+
+    html += '<select id="audit-filter-action" class="form-input" style="width:auto;" onchange="AuditLogPage.setFilter(\'action\', this.value)">';
+    html += '<option value="">全部動作</option>';
+    Object.keys(ACTION_LABELS).forEach(function(k) {
+      html += '<option value="' + k + '"' + (_filters.action === k ? ' selected' : '') + '>' + ACTION_LABELS[k] + '</option>';
+    });
+    html += '</select>';
+
+    html += '<input type="text" id="audit-filter-keyword" class="form-input" style="flex:1;min-width:150px;" placeholder="搜尋摘要/對象/操作者" value="' + escHtml(_filters.keyword || '') + '" onkeydown="if(event.key===\'Enter\')AuditLogPage.keyword()" />';
+
+    var actors = {};
+    AuditLog.getAll().forEach(function(r) {
+      if (r.actorId && r.actorId !== 'system') actors[r.actorId] = r.actorName || r.actorId;
+    });
+    if (Object.keys(actors).length > 0) {
+      html += '<select id="audit-filter-actor" class="form-input" style="width:auto;" onchange="AuditLogPage.setFilter(\'actorId\', this.value)">';
+      html += '<option value="">全部操作者</option>';
+      Object.keys(actors).forEach(function(uid) {
+        html += '<option value="' + escHtml(uid) + '"' + (_filters.actorId === uid ? ' selected' : '') + '>' + escHtml(actors[uid]) + '</option>';
+      });
+      html += '</select>';
+    }
+    html += '</div>';
+
+    if (records.length === 0) {
+      html += '<div style="text-align:center;padding:40px;color:var(--text-muted);"><p>無審計紀錄</p></div>';
+    } else {
+      html += '<div class="table-wrapper"><table class="data-table"><thead><tr>';
+      html += '<th>時間</th><th>操作者</th><th>模組</th><th>動作</th><th>摘要</th>';
+      html += '</tr></thead><tbody>';
+
+      var display = records.slice(0, 50);
+      display.forEach(function(r) {
+        var modLabel = MODULE_LABELS[r.module] || r.module;
+        var actLabel = ACTION_LABELS[r.action] || r.action;
+        html += '<tr>';
+        html += '<td style="white-space:nowrap;">' + escHtml(_fmtTime(r.at)) + '</td>';
+        html += '<td>' + escHtml(r.actorName || r.actorId || '') + '</td>';
+        html += '<td>' + escHtml(modLabel) + '</td>';
+        html += '<td style="color:' + _actionColor(r.action) + ';font-weight:600;">' + escHtml(actLabel) + '</td>';
+        html += '<td style="font-size:var(--font-size-sm);">' + escHtml(r.summary || '') + (r.entityId ? ' <code>' + escHtml(r.entityId) + '</code>' : '') + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+      if (records.length > 50) {
+        html += '<div style="text-align:center;padding:8px;color:var(--text-muted);font-size:var(--font-size-sm);">僅顯示最近 50 筆（共 ' + records.length + ' 筆），請用篩選縮小範圍</div>';
+      }
+    }
+    html += '</div>';
+
+    container.innerHTML = html;
+  }
+
+  function setFilter(k, v) {
+    _filters[k] = v || '';
+    render();
+  }
+  function keyword() {
+    var el = document.getElementById('audit-filter-keyword');
+    _filters.keyword = el ? el.value : '';
+    render();
+  }
+
+  return {
+    render: render,
+    setFilter: setFilter,
+    keyword: keyword,
   };
 })();
 
@@ -8656,6 +10332,7 @@ function exposeGlobals() {
   window.Store = Store;
   window.Router = Router;
   window.Auth = Auth;
+  window.Perm = Perm;
   // Sync
   window.FirebaseSync = FirebaseSync;
   window.Uploader = Uploader;
@@ -8673,6 +10350,10 @@ function exposeGlobals() {
   window.ExtraIncome = ExtraIncome;
   window.HotelConfig = HotelConfig;
   window.WalletTxs = WalletTxs;
+  window.Loans = Loans;
+  window.PendExps = PendExps;
+  window.Catalog = Catalog;
+  window.AuditLog = AuditLog;
   // UI
   window.Toast = Toast;
   window.Modal = Modal;
@@ -8691,6 +10372,8 @@ function exposeGlobals() {
   window.MembersMgmtPage = MembersMgmtPage;
   window.HistoryPage = HistoryPage;
   window.WalletPage = WalletPage;
+  window.ReportsPage = ReportsPage;
+  window.AuditLogPage = AuditLogPage;
   window.SettingsPage = SettingsPage;
   // Calc (for debugging)
   window.calcMemberTx = calcMemberTx;
@@ -8719,10 +10402,18 @@ function onPageChange(pageName) {
     'shareholder': function() { ShareholderPage.render(); },
     'membersMgmt': function() { MembersMgmtPage.render(); },
     'history':     function() { HistoryPage.render(); },
+    'reports':     function() { ReportsPage.render(); },
     'wallet':      function() { WalletPage.render(); },
+    'auditLog':    function() { AuditLogPage.render(); },
     'settings':    function() { SettingsPage.render(); },
   };
   if (renderMap[pageName]) {
+    /* 權限把關：無 read 權限的頁面不渲染（與 APP Router 行為一致） */
+    if (typeof Perm !== 'undefined' && Perm.hasSession() && !Perm.can(pageName, 'read')) {
+      Toast.error('您沒有權限訪問此頁面');
+      Router.go('overview');
+      return;
+    }
     try { renderMap[pageName](); } catch(e) { console.error('[App] render ' + pageName, e); }
   }
 }
@@ -8735,7 +10426,7 @@ function loadAllData() {
       ['MEMBERS','AGENTS','SHAREHOLDERS','TRIPS','MEMBER_TXS','BOOKINGS','SUPPLEMENTS',
        'ARCHIVES','CLOSED_MONTHS','VIP_HALLS','SETTINGS','EXTRA_INCOME','HOTEL_CONFIG',
        'EMPLOYEE_LIST','WALLET_TXS','LOANS','PENDING_EXPS','USERS','LAST_SYNC_TIME',
-       'RECENTLY_DELETED'].forEach(function(k) {
+       'RECENTLY_DELETED','CATALOG','AUDIT_LOG'].forEach(function(k) {
         if (STORAGE_KEYS[k]) localStorage.removeItem(STORAGE_KEYS[k]);
       });
       localStorage.setItem('tw1_data_root', 'pilot');
@@ -8753,10 +10444,14 @@ function loadAllData() {
   Settings.load();
   ExtraIncome.load();
   HotelConfig.load();
-  /* Wallet/Loans/PendExps: APP 端寫入的資料，Web 端載入供會計核對（walletTxs 可編輯刪除） */
+  /* v1.5.0：錢包生態全模組（walletTxs/loans/pendExps/catalog 可完整操作，與 APP 對齊） */
   WalletTxs.load();
-  State.set('loans', Store.readArray(STORAGE_KEYS.LOANS));
-  State.set('pendingExps', Store.readArray(STORAGE_KEYS.PENDING_EXPS));
+  Loans.load();
+  PendExps.load();
+  Catalog.load();
+  /* v1.5.0：審計紀錄（autoLog 埋點所有 CRUD 事件） */
+  AuditLog.load();
+  AuditLog.autoLog();
   /* EMPLOYEE_LIST: 物件結構，直接從 localStorage 讀取 */
   State.set('employeeList', Store.read(STORAGE_KEYS.EMPLOYEE_LIST) || {});
   RecentlyDeleted.init();
@@ -8809,7 +10504,7 @@ function renderUserChip() {
   if (!chip) return;
   var me = Auth.getCurrent();
   if (!me) { chip.innerHTML = ''; return; }
-  var roleLabel = me.role === 'super_admin' ? '超級管理員' : (me.role === 'admin' ? '管理員' : '檢視');
+  var roleLabel = (typeof Perm !== 'undefined') ? Perm.roleLabel(me.role) : me.role;
   chip.innerHTML = '<span class="user-name">' + (me.name || me.email) + '</span><span class="user-role">' + roleLabel + '</span>';
 }
 
@@ -8869,6 +10564,8 @@ async function handleLogin() {
   if (btn) { btn.disabled = false; btn.textContent = '進 入 系 統'; }
   if (res.ok) {
     input.value = '';
+    Perm.setSession(Auth.getCurrent());
+    try { AuditLog.log('auth', 'login', Auth.getCurrent().uid, (Auth.getCurrent().name || email) + ' 登入 Web'); } catch (e) {}
     showApp();
   } else {
     Toast.error(res.error || '登入失敗');
@@ -8897,6 +10594,8 @@ async function handleSetup() {
   if (btn) { btn.disabled = false; btn.textContent = '建 立 管 理 員 帳 號'; }
   if (res.ok) {
     Toast.success('管理員帳號已建立');
+    Perm.setSession(Auth.getCurrent());
+    try { AuditLog.log('auth', 'setup', Auth.getCurrent().uid, '初始設定 super_admin'); } catch (e) {}
     showApp();
   } else {
     Toast.error(res.error || '建立失敗');
@@ -8905,6 +10604,8 @@ async function handleSetup() {
 }
 
 function handleLogout() {
+  try { AuditLog.log('auth', 'logout', Auth.getCurrent() ? Auth.getCurrent().uid : '', (Auth.getCurrent() ? Auth.getCurrent().name : '') + ' 登出 Web'); } catch (e) {}
+  Perm.clear();
   Auth.logout();
   /* 重新載入：清空渲染狀態並回到登入畫面 */
   window.location.reload();
@@ -8918,7 +10619,11 @@ function boot() {
   Keyboard.init();
   FirebaseSync.init().then(function() {
     /* 已有有效 session（7 天內驗證過）→ 直接進入 */
-    if (Auth.restoreSession()) { showApp(); return; }
+    if (Auth.restoreSession()) {
+      Perm.setSession(Auth.getCurrent());
+      showApp();
+      return;
+    }
     /* 無 session → 判斷首次設定 or 登入 */
     Auth.needsSetup().then(function(need) {
       if (need) showSetup();
@@ -8936,4 +10641,4 @@ if (document.readyState === 'loading') {
 
 
 // === Nav Init ===
-(function(){var nav=document.getElementById("nav-list");if(nav){PAGES.forEach(function(p){var li=document.createElement("li");li.className="nav-item";li.setAttribute("data-page",p.name);li.innerHTML='<span class="nav-icon">'+p.icon+'</span><span class="nav-label">'+p.label+'</span>';li.onclick=function(){Router.go(p.name);document.getElementById("topbar-title").textContent=p.label;};nav.appendChild(li);});}})();
+(function(){var nav=document.getElementById("nav-list");if(nav){PAGES.forEach(function(p){if(typeof Perm!=="undefined"&&Perm.hasSession()&&!Perm.can(p.name,"read"))return;var li=document.createElement("li");li.className="nav-item";li.setAttribute("data-page",p.name);li.innerHTML='<span class="nav-icon">'+p.icon+'</span><span class="nav-label">'+p.label+'</span>';li.onclick=function(){Router.go(p.name);document.getElementById("topbar-title").textContent=p.label;};nav.appendChild(li);});}})();
