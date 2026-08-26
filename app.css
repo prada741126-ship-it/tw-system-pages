@@ -374,6 +374,8 @@ a { color: var(--accent); text-decoration: none; }
   body { background: var(--bg-secondary); color: var(--text-primary); }
 }
 
+/* 報表中心樣式統一放在 css/pages/reports.css */
+
 /* pages/overview.css — 總覽頁 KPI 卡片 + 圖表 + 活躍團 + 待結帳警示 + 快捷操作 */
 
 /* KPI 網格 */
@@ -1496,6 +1498,55 @@ a { color: var(--accent); text-decoration: none; }
   .ht-month-stats {
     justify-content: flex-start;
   }
+}
+
+/* pages/reports.css — 報表中心 + 操作日誌頁 */
+
+/* 報表卡片格線 */
+.reports-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--spacing-md); }
+.rpt-card {
+  display: flex; align-items: center; gap: var(--spacing-md);
+  background: var(--bg-hover); border-radius: var(--radius);
+  padding: var(--spacing-md); cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.rpt-card:hover { background: var(--bg-active, var(--bg-hover)); transform: translateY(-1px); }
+.rpt-card:active { transform: translateY(0); }
+.rpt-icon { font-size: 28px; line-height: 1; flex: 0 0 auto; }
+.rpt-info { flex: 1; min-width: 0; }
+.rpt-title { font-weight: 600; font-size: var(--font-size-md, 15px); }
+.rpt-desc { font-size: var(--font-size-sm); color: var(--text-secondary); margin-top: 2px; }
+.rpt-arrow { flex: 0 0 auto; color: var(--text-muted); font-size: 20px; }
+
+/* 快覽統計 */
+.rpt-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--spacing-md); }
+.rpt-stat-item {
+  background: var(--bg-hover); border-radius: var(--radius);
+  padding: var(--spacing-md); text-align: center;
+  display: flex; flex-direction: column; gap: var(--spacing-xs);
+}
+.rpt-stat-val { font-size: 22px; font-weight: 700; }
+.rpt-stat-label { font-size: var(--font-size-sm); color: var(--text-secondary); }
+
+/* 操作日誌篩選列 */
+.al-filter-bar { display: flex; gap: var(--spacing-md); flex-wrap: wrap; align-items: flex-end; margin-bottom: var(--spacing-md); }
+.al-filter-bar .form-group { flex: 1; min-width: 140px; margin-bottom: 0; }
+.al-entry { white-space: nowrap; }
+.al-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: var(--font-size-sm); font-weight: 600;
+}
+.al-badge-create { background: rgba(40, 167, 69, 0.15); color: var(--success); }
+.al-badge-update { background: rgba(255, 193, 7, 0.18); color: var(--warning); }
+.al-badge-delete { background: rgba(220, 53, 69, 0.15); color: var(--danger); }
+.al-badge-login, .al-badge-logout { background: rgba(13, 110, 253, 0.12); color: var(--info); }
+.al-badge-export, .al-badge-import { background: rgba(108, 117, 125, 0.15); color: var(--text-secondary); }
+
+/* 響應式 */
+@media (max-width: 768px) {
+  .reports-grid { grid-template-columns: 1fr; }
+  .rpt-stats { grid-template-columns: repeat(2, 1fr); }
+  .al-filter-bar { flex-direction: column; align-items: stretch; }
 }
 
 /* pages/settings.css — 設定頁 費率/貴賓廳/門檻/密碼表單 */
