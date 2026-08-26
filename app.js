@@ -2556,6 +2556,96 @@ var HotelConfig = (function() {
 })();
 
 
+// === src/data/walletTxs.js ===
+/**
+ * data/walletTxs.js — 港幣錢包流水 CRUD
+ * 依賴: core/constants.js, core/store.js, core/state.js, core/time.js, sync/uploader.js
+ *
+ * 分類：
+ *  - 手動型（opening/deposit/adjust/manual，_fbKey 開頭 wtx_open_/wtx_m_）
+ *    可安全編輯/刪除，Web 端為唯一真相來源。
+ *  - 衍生型（wtx_mtx_/wtx_pexp_/wtx_loan_/wtx_loanr_，由 APP 端 Wallet.syncForTx
+ *    自 memberTx/pendingExp/loan 產生）。Web 端可編輯/刪除，但 APP 端 reconcileAll
+ *    會從來源重建 → 刪除可能被復原。若要真正移除衍生流水，應刪除來源
+ *    （會員帳務/借支/預支），非從錢包流水頁操作。
+ */
+var WalletTxs = (function() {
+  function load() {
+    var arr = Store.readArray(STORAGE_KEYS.WALLET_TXS);
+    State.set('walletTxs', arr);
+    return arr;
+  }
+  function save(arr) {
+    Store.writeArray(STORAGE_KEYS.WALLET_TXS, arr);
+    State.set('walletTxs', arr);
+  }
+  function getAll() {
+    return (State.get('walletTxs') || []).filter(function(w) { return !w._deleted; });
+  }
+  function getById(id) {
+    return getAll().find(function(w) { return w.id === id; });
+  }
+  /* 衍生流水：APP 端 reconcileAll 會從來源（memberTx/pendingExp/loan）重建 */
+  function isDerived(w) {
+    var id = w && (w.id || w._fbKey) || '';
+    return /^wtx_(mtx_|pexp_|loan_|loanr_)/.test(id);
+  }
+  /* 手動流水：Web 端建立，APP 不會重建 */
+  function isManual(w) {
+    var id = w && (w.id || w._fbKey) || '';
+    return /^wtx_(open_|m_)/.test(id);
+  }
+  function create(data) {
+    var now = Date.now();
+    var id = data.id || ('wtx_m_' + now + '_' + Math.random().toString(36).slice(2, 6));
+    var item = {
+      id: id,
+      date: data.date || todayStr(),
+      type: data.type || 'manual',
+      amountHKD: Math.round(data.amountHKD || 0),
+      memberId: data.memberId || '',
+      tripId: data.tripId || '',
+      note: data.note || '',
+      _fbKey: id,
+      _updatedAt: now,
+    };
+    var arr = State.get('walletTxs') || [];
+    arr.push(item);
+    save(arr);
+    var obj = {}; obj[item._fbKey] = item;
+    enqueue(FB_PATH.WALLET_TXS, obj);
+    EventBus.emit(EVENTS.WALLET_TXS_LOADED, item);
+    return item;
+  }
+  function update(id, patch) {
+    var arr = State.get('walletTxs') || [];
+    var idx = arr.findIndex(function(w) { return w.id === id; });
+    if (idx < 0) return null;
+    var merged = Object.assign({}, arr[idx], patch, { _updatedAt: Date.now() });
+    arr[idx] = merged;
+    save(arr);
+    var obj = {}; obj[merged._fbKey] = merged;
+    enqueue(FB_PATH.WALLET_TXS, obj);
+    return merged;
+  }
+  function remove(id) {
+    var arr = State.get('walletTxs') || [];
+    var idx = arr.findIndex(function(w) { return w.id === id; });
+    if (idx < 0) return;
+    arr[idx]._deleted = true;
+    arr[idx]._updatedAt = Date.now();
+    save(arr);
+    var obj = {}; obj[arr[idx]._fbKey] = arr[idx];
+    enqueue(FB_PATH.WALLET_TXS, obj);
+  }
+  return {
+    load: load, save: save, getAll: getAll, getById: getById,
+    isDerived: isDerived, isManual: isManual,
+    create: create, update: update, remove: remove,
+  };
+})();
+
+
 // === src/ui/toast.js ===
 /**
  * ui/toast.js — Toast 通知
@@ -4309,7 +4399,13 @@ var MemberPage = (function() {
   function showAddTx() {
     var trip = Trips.getById(_selectedTrip);
     if (!trip) return;
-    var members = Members.getAll();
+    /* 只顯示該團的會員（團 memberIds + 此團已有帳務的會員）；舊團無會員清單時 fallback 全部 */
+    var tripMemberIds = {};
+    (trip.memberIds || []).forEach(function(id) { tripMemberIds[id] = true; });
+    MemberTxs.getByTrip(trip.id).forEach(function(tx) { if (tx.memberId) tripMemberIds[tx.memberId] = true; });
+    var members = Members.getAll().filter(function(m) { return tripMemberIds[m.id]; });
+    if (members.length === 0) members = Members.getAll();
+    members.sort(function(a, b) { return (a.id || '').localeCompare(b.id || ''); });
     var defaultM = members.length > 0 ? members[0] : { rate1: 0, rebate1: 0, rate2: 0, rebate2: 0 };
     var html = '';
     html += '<div class="form-group"><label>會員</label>';
@@ -5481,9 +5577,46 @@ var RoomPage = (function() {
   }
 
   /* ===== 酒店設定 Modal ===== */
-  function showHotelConfig() {
+  /* Modal 捲動位置保留：重渲染後回復原捲動處，不必每次重新下拉 */
+  function _hotelCfgScrollTop() {
+    var box = document.querySelector('#modal-overlay .modal-box');
+    return box ? box.scrollTop : 0;
+  }
+  function _hotelCfgRestoreScroll(top) {
+    if (!top) return;
+    setTimeout(function() {
+      var box = document.querySelector('#modal-overlay .modal-box');
+      if (box) box.scrollTop = top;
+    }, 30);
+  }
+
+  function showHotelConfig(keepScroll) {
+    var prevScroll = keepScroll ? _hotelCfgScrollTop() : 0;
     var html = '';
-    html += '<div style="max-height:70vh;overflow-y:auto;">';
+
+    /* 新增配置區（置頂，立即可見） */
+    var casinos0 = HotelConfig.getCasinos();
+    html += '<div style="border-bottom:2px solid var(--border);padding-bottom:12px;margin-bottom:12px;">';
+    html += '<h4 style="margin:0 0 8px;">\u2795 新增酒店配置</h4>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>體系</label><input type="text" id="hc-new-casino" class="form-input" placeholder="如: 金沙" list="hc-casino-list"></div>';
+    html += '<div class="form-group"><label>酒店</label><input type="text" id="hc-new-hotel" class="form-input" placeholder="如: 倫敦人"></div>';
+    html += '</div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>房型</label><input type="text" id="hc-new-room" class="form-input" placeholder="如: 名匯普通房"></div>';
+    html += '<div class="form-group"><label>代碼</label><input type="text" id="hc-new-code" class="form-input" placeholder="如: RK"></div>';
+    html += '<div class="form-group"><label>門檻(萬)</label><input type="number" id="hc-new-threshold" class="form-input" placeholder="如: 60" step="1" min="0"></div>';
+    html += '</div>';
+    html += '<datalist id="hc-casino-list">';
+    casinos0.forEach(function(c) { html += '<option value="' + escHtml(c) + '">'; });
+    html += '</datalist>';
+    html += '<div style="text-align:right;margin-top:8px;">';
+    html += '<button class="btn btn-primary" onclick="RoomPage.saveNewHotelConfig()">新增</button>';
+    html += '</div>';
+    html += '</div>';
+
+    /* 按體系分組顯示（單一捲動容器＝Modal 本體，不再巢狀捲動） */
+    html += '<div>';
 
     /* 按體系分組顯示 */
     var casinos = HotelConfig.getCasinos();
@@ -5516,27 +5649,10 @@ var RoomPage = (function() {
 
     html += '</div>';
 
-    /* 新增配置區 */
-    html += '<div style="border-top:2px solid var(--border);padding-top:12px;margin-top:8px;">';
-    html += '<h4 style="margin:0 0 8px;">\u2795 新增酒店配置</h4>';
-    html += '<div class="form-row">';
-    html += '<div class="form-group"><label>體系</label><input type="text" id="hc-new-casino" class="form-input" placeholder="如: 金沙" list="hc-casino-list"></div>';
-    html += '<div class="form-group"><label>酒店</label><input type="text" id="hc-new-hotel" class="form-input" placeholder="如: 倫敦人"></div>';
-    html += '</div>';
-    html += '<div class="form-row">';
-    html += '<div class="form-group"><label>房型</label><input type="text" id="hc-new-room" class="form-input" placeholder="如: 名匯普通房"></div>';
-    html += '<div class="form-group"><label>代碼</label><input type="text" id="hc-new-code" class="form-input" placeholder="如: RK"></div>';
-    html += '<div class="form-group"><label>門檻(萬)</label><input type="number" id="hc-new-threshold" class="form-input" placeholder="如: 60" step="1" min="0"></div>';
-    html += '</div>';
-    html += '<datalist id="hc-casino-list">';
-    casinos.forEach(function(c) { html += '<option value="' + escHtml(c) + '">'; });
-    html += '</datalist>';
-    html += '<div style="text-align:right;margin-top:8px;">';
-    html += '<button class="btn btn-primary" onclick="RoomPage.saveNewHotelConfig()">新增</button>';
-    html += '</div>';
-    html += '</div>';
-
     Modal.open('酒店設定 — 門檻管理', html);
+    if (keepScroll) {
+      _hotelCfgRestoreScroll(prevScroll);
+    }
   }
 
   function saveHotelThreshold(id) {
@@ -5568,7 +5684,7 @@ var RoomPage = (function() {
       threshold: Math.round(wan * 10000),
     });
     Toast.success('已新增: ' + casino + ' / ' + hotel + ' / ' + room);
-    showHotelConfig(); /* 重新渲染 Modal */
+    showHotelConfig(true); /* 重新渲染 Modal，保留捲動位置 */
   }
 
   function delHotelConfig(id) {
@@ -5577,7 +5693,7 @@ var RoomPage = (function() {
     Modal.confirm('確定刪除「' + item.casino + ' / ' + item.hotel + ' / ' + item.room + '」？', function() {
       HotelConfig.remove(id);
       Toast.success('已刪除');
-      showHotelConfig(); /* 重新渲染 Modal */
+      showHotelConfig(true); /* 重新渲染 Modal，保留捲動位置 */
     });
   }
 
@@ -7906,14 +8022,15 @@ var HistoryPage = (function() {
 
 // === src/pages/wallet.js ===
 /**
- * pages/wallet.js — 錢包流水頁（唯讀，供會計核對）
+ * pages/wallet.js — 錢包流水頁（會計核對＋可編輯刪除）
  * 顯示 APP 端產生的三類資料：
- * 1. 港幣現鈔錢包流水 (walletTxs)
- * 2. 港幣借支 (loans)
- * 3. 預支開銷 (pendingExps)
+ * 1. 港幣現鈔錢包流水 (walletTxs) — 可編輯/刪除/補登
+ * 2. 港幣借支 (loans) — 唯讀
+ * 3. 預支開銷 (pendingExps) — 唯讀
  */
 var WalletPage = (function() {
   var _tab = 'wallet';
+  var _editingId = null;
 
   function fmtHK(n) {
     var v = Math.round(n || 0);
@@ -7928,6 +8045,8 @@ var WalletPage = (function() {
     var labels = {
       'opening': '開帳', 'deposit': '補登', 'loan': '借支登記',
       'repay': '借支回收', 'payout': '開銷墊付', 'adjust': '調整',
+      'manual': '手動', 'member_tx': '帳務衍生', 'credit_tx': '信用碼衍生',
+      'pexp': '預支衍生', 'loan_repay': '借支回收衍生',
     };
     return labels[t] || t || '';
   }
@@ -7943,6 +8062,41 @@ var WalletPage = (function() {
     var t = (State.get('trips') || []).find(function(t) { return t.id === id; });
     if (!t) return id;
     return t.label ? (t.id + ' ' + t.label) : t.id;
+  }
+
+  function memberOptions(selectedId) {
+    var html = '<option value="">（無）</option>';
+    (State.get('members') || []).forEach(function(m) {
+      var s = m.id === selectedId ? ' selected' : '';
+      html += '<option value="' + escHtml(m.id) + '"' + s + '>' + escHtml(m.name || m.id) + '</option>';
+    });
+    return html;
+  }
+
+  function tripOptions(selectedId) {
+    var html = '<option value="">（無）</option>';
+    (State.get('trips') || []).forEach(function(t) {
+      var s = t.id === selectedId ? ' selected' : '';
+      html += '<option value="' + escHtml(t.id) + '"' + s + '>' + escHtml(t.label ? (t.id + ' ' + t.label) : t.id) + '</option>';
+    });
+    return html;
+  }
+
+  function typeOptions(selected, manualOnly) {
+    var manual = [
+      ['opening', '開帳'], ['deposit', '補登'], ['adjust', '調整'], ['manual', '手動'],
+    ];
+    var derived = [
+      ['member_tx', '帳務衍生'], ['credit_tx', '信用碼衍生'], ['pexp', '預支衍生'],
+      ['loan', '借支登記'], ['loan_repay', '借支回收衍生'], ['repay', '借支回收'], ['payout', '開銷墊付'],
+    ];
+    var list = manualOnly ? manual : manual.concat(derived);
+    var html = '';
+    list.forEach(function(p) {
+      var s = p[0] === selected ? ' selected' : '';
+      html += '<option value="' + p[0] + '"' + s + '>' + p[1] + '</option>';
+    });
+    return html;
   }
 
   function render() {
@@ -7976,6 +8130,11 @@ var WalletPage = (function() {
 
     var html = '';
 
+    /* 補登按鈕 */
+    html += '<div style="margin-bottom:12px;text-align:right;">';
+    html += '<button class="btn btn-primary" onclick="WalletPage.showAddWalletTx()">＋ 補登流水</button>';
+    html += '</div>';
+
     /* 餘額摘要 */
     html += '<div class="kpi-grid" style="margin-bottom:16px;">';
     html += '<div class="kpi-card highlight"><div class="kpi-label">錢包餘額(HK$)</div><div class="kpi-value">' + fmtHK(balance) + '</div></div>';
@@ -7985,23 +8144,31 @@ var WalletPage = (function() {
     html += '</div>';
 
     if (txs.length === 0) {
-      html += '<div class="empty-state">無錢包流水記錄</div>';
+      html += '<div class="empty-state">無錢包流水記錄，點「補登流水」新增</div>';
       return html;
     }
 
     html += '<div class="table-wrapper"><table class="data-table"><thead><tr>';
-    html += '<th>日期</th><th>類型</th><th class="num">金額(HK$)</th><th>會員</th><th>團</th><th>備註</th>';
+    html += '<th>日期</th><th>類型</th><th class="num">金額(HK$)</th><th>會員</th><th>團</th><th>備註</th><th>操作</th>';
     html += '</tr></thead><tbody>';
 
     txs.forEach(function(w) {
       var amt = w.amountHKD || 0;
+      var derived = WalletTxs.isDerived(w);
+      var typeBadge = derived
+        ? '<span style="color:var(--warning);" title="衍生流水，APP 對帳可能重建">⚠ ' + escHtml(typeName(w.type)) + '</span>'
+        : escHtml(typeName(w.type));
       html += '<tr>';
       html += '<td>' + escHtml(w.date || '') + '</td>';
-      html += '<td>' + escHtml(typeName(w.type)) + '</td>';
+      html += '<td>' + typeBadge + '</td>';
       html += '<td class="num" style="' + (amt >= 0 ? 'color:var(--success)' : 'color:var(--danger)') + ';">' + fmtHK(amt) + '</td>';
       html += '<td>' + escHtml(memberName(w.memberId)) + '</td>';
       html += '<td>' + escHtml(tripLabel(w.tripId)) + '</td>';
       html += '<td>' + escHtml(w.note || '') + '</td>';
+      html += '<td style="white-space:nowrap;">';
+      html += '<button class="btn-sm" onclick="WalletPage.showEditWalletTx(\'' + escHtml(w.id) + '\')">編</button> ';
+      html += '<button class="btn-sm btn-danger" onclick="WalletPage.deleteWalletTx(\'' + escHtml(w.id) + '\')">刪</button>';
+      html += '</td>';
       html += '</tr>';
     });
 
@@ -8120,9 +8287,105 @@ var WalletPage = (function() {
     render();
   }
 
+  /* ===== 錢包流水 CRUD ===== */
+  function _walletTxForm(item) {
+    var w = item || {};
+    var derived = item ? WalletTxs.isDerived(item) : false;
+    var html = '';
+    if (derived) {
+      html += '<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-tertiary);border-left:3px solid var(--warning);font-size:var(--font-size-sm);">';
+      html += '⚠ 此為衍生流水（由帳務/借支/預支自動產生）。APP 端對帳時可能重建，';
+      html += '若要真正移除請刪除來源記錄。';
+      html += '</div>';
+    }
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>日期</label><input type="date" id="wtx-date" class="form-input" value="' + escHtml(w.date || todayStr()) + '"></div>';
+    html += '<div class="form-group"><label>類型</label><select id="wtx-type" class="form-input">' + typeOptions(w.type, !derived) + '</select></div>';
+    html += '</div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>金額(HK$)</label><input type="number" id="wtx-amount" class="form-input" value="' + (w.amountHKD != null ? w.amountHKD : '') + '" step="1" placeholder="正數流入/負數流出"></div>';
+    html += '<div class="form-group"><label>會員</label><select id="wtx-member" class="form-input">' + memberOptions(w.memberId) + '</select></div>';
+    html += '</div>';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>團</label><select id="wtx-trip" class="form-input">' + tripOptions(w.tripId) + '</select></div>';
+    html += '<div class="form-group"><label>備註</label><input type="text" id="wtx-note" class="form-input" value="' + escHtml(w.note || '') + '"></div>';
+    html += '</div>';
+    html += '<div style="text-align:right;margin-top:12px;">';
+    html += '<button class="btn btn-secondary" onclick="Modal.close()">取消</button> ';
+    html += '<button class="btn btn-primary" id="wtx-save-btn">儲存</button>';
+    html += '</div>';
+    return html;
+  }
+
+  function showAddWalletTx() {
+    _editingId = null;
+    Modal.open('補登錢包流水', _walletTxForm(null));
+    setTimeout(function() {
+      var btn = document.getElementById('wtx-save-btn');
+      if (btn) btn.onclick = saveWalletTx;
+    }, 50);
+  }
+
+  function showEditWalletTx(id) {
+    var w = WalletTxs.getById(id);
+    if (!w) { Toast.error('找不到流水 ' + id); return; }
+    _editingId = id;
+    Modal.open('編輯錢包流水', _walletTxForm(w));
+    setTimeout(function() {
+      var btn = document.getElementById('wtx-save-btn');
+      if (btn) btn.onclick = saveWalletTx;
+    }, 50);
+  }
+
+  function saveWalletTx() {
+    var date = document.getElementById('wtx-date').value.trim();
+    var type = document.getElementById('wtx-type').value;
+    var amount = parseFloat(document.getElementById('wtx-amount').value);
+    var memberId = document.getElementById('wtx-member').value;
+    var tripId = document.getElementById('wtx-trip').value;
+    var note = document.getElementById('wtx-note').value.trim();
+
+    if (!date) { Toast.warning('請填日期'); return; }
+    if (isNaN(amount)) { Toast.warning('請填金額'); return; }
+
+    var data = {
+      date: date, type: type, amountHKD: Math.round(amount),
+      memberId: memberId, tripId: tripId, note: note,
+    };
+    if (_editingId) {
+      WalletTxs.update(_editingId, data);
+      Toast.success('已更新錢包流水');
+    } else {
+      WalletTxs.create(data);
+      Toast.success('已補登錢包流水');
+    }
+    _editingId = null;
+    Modal.close();
+    render();
+  }
+
+  function deleteWalletTx(id) {
+    var w = WalletTxs.getById(id);
+    if (!w) return;
+    var derived = WalletTxs.isDerived(w);
+    var msg = '確定刪除「' + (w.date || '') + ' ' + typeName(w.type) + ' ' + fmtHK(w.amountHKD || 0) + '」？';
+    if (derived) {
+      msg += '\n\n⚠ 此為衍生流水，APP 端對帳時可能自動重建。若要真正移除，請刪除來源（帳務/借支/預支）。';
+    }
+    Modal.confirm(msg, function() {
+      WalletTxs.remove(id);
+      Toast.success('已刪除');
+      render();
+    });
+  }
+
   return {
     render: render,
     _tab: setTab,
+    showAddWalletTx: showAddWalletTx,
+    showEditWalletTx: showEditWalletTx,
+    saveWalletTx: saveWalletTx,
+    deleteWalletTx: deleteWalletTx,
   };
 })();
 
@@ -8409,6 +8672,7 @@ function exposeGlobals() {
   window.Settings = Settings;
   window.ExtraIncome = ExtraIncome;
   window.HotelConfig = HotelConfig;
+  window.WalletTxs = WalletTxs;
   // UI
   window.Toast = Toast;
   window.Modal = Modal;
@@ -8489,8 +8753,8 @@ function loadAllData() {
   Settings.load();
   ExtraIncome.load();
   HotelConfig.load();
-  /* Wallet/Loans/PendExps: APP 端寫入的資料，Web 端唯讀載入供會計核對 */
-  State.set('walletTxs', Store.readArray(STORAGE_KEYS.WALLET_TXS));
+  /* Wallet/Loans/PendExps: APP 端寫入的資料，Web 端載入供會計核對（walletTxs 可編輯刪除） */
+  WalletTxs.load();
   State.set('loans', Store.readArray(STORAGE_KEYS.LOANS));
   State.set('pendingExps', Store.readArray(STORAGE_KEYS.PENDING_EXPS));
   /* EMPLOYEE_LIST: 物件結構，直接從 localStorage 讀取 */
