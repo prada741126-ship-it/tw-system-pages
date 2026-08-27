@@ -2187,6 +2187,12 @@ var Trips = (function() {
       sealedMonth: sealedMonth,
     });
   }
+  /* v1.9.11 撤回待結帳：退回 active 恢復可編輯（交收完成封存前都可反悔） */
+  function revertPending(id) {
+    var t = getById(id);
+    if (!t || t.status !== TRIP_STATUS.PENDING_SETTLEMENT) return null;
+    return update(id, { status: TRIP_STATUS.ACTIVE });
+  }
   function remove(id) {
     var arr = State.get('trips') || [];
     var idx = arr.findIndex(function(t) { return t.id === id; });
@@ -2204,7 +2210,7 @@ var Trips = (function() {
     if (!t) return typeof tripOrId === 'string' ? tripOrId : '';
     return t.label ? (t.id + ' · ' + t.label) : t.id;
   }
-  return { load: load, save: save, getAll: getAll, getById: getById, getActiveByShareholder: getActiveByShareholder, create: create, update: update, sealTrip: sealTrip, remove: remove, displayName: displayName };
+  return { load: load, save: save, getAll: getAll, getById: getById, getActiveByShareholder: getActiveByShareholder, create: create, update: update, sealTrip: sealTrip, revertPending: revertPending, remove: remove, displayName: displayName };
 })();
 
 
@@ -4289,6 +4295,155 @@ var PdfExport = (function() {
 })();
 
 
+// === src/ui/tripShare.js ===
+/**
+ * ui/tripShare.js — 結帳明細分享（上級收帳用）
+ * 供帳務頁(member.js)與待結帳頁(pending.js)共用：
+ *   TripShare.openShareText(tripId) 開啟分享面板（產生明細文字 + 複製）
+ * 純文字/UI 依賴，不依賴任何 Page 模組，避免 pages/ 互相引用。
+ */
+var TripShare = (function() {
+  function escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function maskName(name) {
+    if (!name) return '';
+    if (name.length <= 2) return name[0] + '*';
+    return name[0] + '*'.repeat(name.length - 2) + name[name.length - 1];
+  }
+  function fmtCardNum(n) {
+    var v = Math.round(n * 1000) / 1000;
+    if (Math.abs(v - Math.round(v)) < 1e-6) return Math.round(v).toLocaleString();
+    return v.toFixed(3).replace(/\.?0+$/, '');
+  }
+  // 總交收 = 小計×10000 - 開銷NT
+  function calcTotalNT(tx) {
+    return (tx.subtotal || 0) * 10000 - (tx.expensesNT || 0);
+  }
+  function getHallName(tx, trip) {
+    var hallId = tx.vipHallId || (trip && trip.hallIds && trip.hallIds[0]) || '';
+    var hall = VIP_HALLS.find(function(h) { return h.id === hallId; });
+    return hall ? hall.name : hallId;
+  }
+  function calcAbsorbedNT(expenses) {
+    return (expenses || []).reduce(function(s, e) { return s + (e.absorbed ? (e.amountHK || 0) * (e.exchangeRate || 0) : 0); }, 0);
+  }
+
+  function buildShareText(tripId) {
+    var trip = Trips.getById(tripId);
+    if (!trip) return '';
+    var sh = Shareholders.getById(trip.shareholderId);
+    var ag = trip.agentId ? Agents.getById(trip.agentId) : null;
+    var mtxs = MemberTxs.getByTrip(tripId);
+    var supplements = Supplements.getByTrip(tripId);
+
+    /* 訂房口徑與 pending 卡片一致：有 tripId 只歸自己的團；無 tripId 按代理＋入住日歸屬 */
+    var allBookings = Bookings.getAll();
+    var tripAgentIds = {};
+    mtxs.forEach(function(tx) {
+      var aid = tx.agentId || (trip.agentId || '');
+      if (aid) tripAgentIds[aid] = true;
+    });
+    if (trip.agentId) tripAgentIds[trip.agentId] = true;
+    var bookings = allBookings.filter(function(b) {
+      if (b.tripId) return b.tripId === trip.id;
+      var bAgentId = b.agentId;
+      if (!bAgentId || !tripAgentIds[bAgentId]) return false;
+      var ci = b.checkIn || '';
+      if (!ci) return false;
+      if (trip.startDate && ci < trip.startDate) return false;
+      if (trip.endDate && ci > trip.endDate) return false;
+      return true;
+    });
+
+    var totalWash = mtxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
+    var totalSettle = mtxs.reduce(function(s, t) { return s + calcTotalNT(t); }, 0);
+    var roomNights = bookings.reduce(function(s, b) { return s + (b.nights || 1); }, 0);
+    var supPending = supplements.filter(function(s) { return s.status === 'pending'; })
+      .reduce(function(s, sup) { return s + (sup.settlementAmount || 0); }, 0);
+
+    /* 按會員分組，彙總各會員開銷明細；代理吸收的開銷單獨列示 */
+    var memberGroups = {};
+    mtxs.forEach(function(tx) {
+      var mid = tx.memberId;
+      if (!memberGroups[mid]) memberGroups[mid] = { totalSettle: 0, hallName: '', expNT: 0, expList: [], absNT: 0, absList: [] };
+      memberGroups[mid].totalSettle += calcTotalNT(tx);
+      if (!memberGroups[mid].hallName) memberGroups[mid].hallName = getHallName(tx, trip);
+      (tx.expenses || []).forEach(function(e) {
+        var q = (e.quantity && e.quantity > 1) ? '×' + e.quantity : '';
+        var item = (e.name || '項目') + q + ' ' + fmtCardNum(e.amountHK || 0) + 'HK';
+        if (e.absorbed) {
+          memberGroups[mid].absNT += (e.amountHK || 0) * (e.exchangeRate || 0);
+          memberGroups[mid].absList.push(item);
+        } else {
+          memberGroups[mid].expNT += (e.amountHK || 0) * (e.exchangeRate || 0);
+          memberGroups[mid].expList.push(item);
+        }
+      });
+    });
+
+    var lines = [];
+    lines.push('【團 ' + trip.id + ' 結帳明細】');
+    var head = [];
+    head.push('股東: ' + (sh ? sh.name : '-'));
+    if (ag) head.push('代理: ' + ag.name);
+    if (trip.visitDate) head.push('前往日: ' + trip.visitDate);
+    if (trip.hotelNote) head.push('酒店: ' + trip.hotelNote);
+    lines.push(head.join(' | '));
+    lines.push('會員 ' + mtxs.length + ' 筆 · 洗碼 ' + fmtCardNum(totalWash) + ' 萬 · 訂房 ' + roomNights + ' 晚');
+    if (supPending > 0) lines.push('待補帳 NT$ ' + fmtCardNum(Math.round(supPending)));
+    if (mtxs.length > 0) {
+      lines.push('──── 會員明細 ────');
+      Object.keys(memberGroups).forEach(function(mid) {
+        var g = memberGroups[mid];
+        var m = Members.getById(mid);
+        lines.push((m ? maskName(m.name) : mid) + '（' + g.hallName + '）交收 NT$ ' + fmtCardNum(Math.round(g.totalSettle)));
+        if (g.expList.length > 0) lines.push('　開銷: ' + g.expList.join('、') + '（NT$ ' + fmtCardNum(Math.round(g.expNT)) + '，已從交收扣除）');
+        if (g.absList.length > 0) lines.push('　代理吸收: ' + g.absList.join('、') + '（NT$ ' + fmtCardNum(Math.round(g.absNT)) + '，向代理另收，不從會員交收扣除）');
+      });
+      var absGrand = mtxs.reduce(function(s, t) { return s + calcAbsorbedNT(t.expenses || []); }, 0);
+      if (absGrand > 0) {
+        lines.push('──── 會員交收 NT$ ' + fmtCardNum(Math.trunc(totalSettle / 100) * 100) + ' ────');
+        lines.push('代理吸收（向代理另收） NT$ ' + fmtCardNum(absGrand));
+        lines.push('應收總額 NT$ ' + fmtCardNum(Math.trunc((totalSettle + absGrand) / 100) * 100) + ' ＝ 會員交收 + 代理吸收');
+      } else {
+        lines.push('──── 合計 NT$ ' + fmtCardNum(Math.trunc(totalSettle / 100) * 100) + ' ────');
+      }
+    } else {
+      lines.push('此團尚無帳務記錄');
+    }
+    if (trip.notes) lines.push('備註: ' + trip.notes);
+    return lines.join('\n');
+  }
+
+  function openShareText(tripId) {
+    var text = buildShareText(tripId);
+    if (!text) return;
+    var html = '<div class="section-desc">結帳明細已產生，複製以下內容傳給上級代理/股東（可貼到微信/LINE）：</div>';
+    html += '<textarea id="share-text" class="form-input" style="width:100%;height:280px;font-size:var(--font-size-sm);" readonly>' + escHtml(text) + '</textarea>';
+    html += '<div style="text-align:right;margin-top:12px;">';
+    html += '<button class="btn btn-primary" onclick="TripShare._copyShareText()">複製明細</button></div>';
+    Modal.open('團 ' + tripId + ' 結帳明細', html);
+  }
+  function _copyShareText() {
+    var ta = document.getElementById('share-text');
+    if (!ta) return;
+    ta.removeAttribute('readonly');
+    ta.select();
+    try {
+      document.execCommand('copy');
+      Toast.success('已複製，請貼給上級');
+    } catch (e) {
+      Toast.error('複製失敗，請手動選取文字');
+    }
+  }
+
+  return { openShareText: openShareText, buildShareText: buildShareText, _copyShareText: _copyShareText };
+})();
+
+
 // === src/pages/overview.js ===
 /**
  * pages/overview.js — 总览页
@@ -4859,6 +5014,8 @@ var PendingPage = (function() {
     html += '<div class="mb-ap-stat"><label>訂房數</label><span>' + roomNights + ' 晚</span></div>';
     html += '<div class="mb-ap-stat"><label>會員數</label><span>' + memberCount + '</span></div>';
     html += '</div>';
+    html += '<button class="btn btn-secondary" onclick="PendingPage.revertPending(\'' + trip.id + '\')">撤回待結帳</button>';
+    html += '<button class="btn btn-primary" onclick="TripShare.openShareText(\'' + trip.id + '\')">重傳明細</button>';
     html += '<button class="btn btn-danger" onclick="PendingPage.sealTrip(\'' + trip.id + '\')">歸檔封存</button>';
     html += '</div>';
 
@@ -4971,6 +5128,15 @@ var PendingPage = (function() {
     Modal.open('會員明細', html);
   }
 
+  /* v1.9.11 撤回待結帳：退回帳務頁恢復可編輯（計算錯誤時用；封存＝雙方確認才不可逆） */
+  function revertPending(tripId) {
+    Modal.confirm('將團 ' + tripId + ' 撤回帳務頁？\n撤回後帳務恢復可編輯，修正後需再次「傳帳給上級」。', function() {
+      var ok = Trips.revertPending(tripId);
+      Toast[ok ? 'success' : 'error'](ok ? '團 ' + tripId + ' 已撤回，可重新編輯帳務' : '撤回失敗（此團不在待結帳狀態）');
+      if (ok) render();
+    });
+  }
+
   function sealTrip(tripId) {
     Modal.confirm('封存後不可修改，確定要封存團 ' + tripId + '？', function() {
       Trips.sealTrip(tripId);
@@ -4979,7 +5145,7 @@ var PendingPage = (function() {
     });
   }
 
-  return { render: render, sealTrip: sealTrip, toggleCard: toggleCard, showMemberDetail: showMemberDetail };
+  return { render: render, sealTrip: sealTrip, toggleCard: toggleCard, showMemberDetail: showMemberDetail, revertPending: revertPending };
 })();
 
 
@@ -5054,13 +5220,22 @@ var MemberPage = (function() {
         html += '<option value="' + ag.id + '"' + (_selectedAgent === ag.id ? ' selected' : '') + '>' + ag.name + '</option>';
       });
       html += '</select>';
-      // 送入待結帳按鈕（僅 ACTIVE 狀態顯示）
+      // 傳帳給上級＝送入待結帳（ACTIVE）；待結帳中顯示鎖定＋可撤回重編
       if (tripObj && tripObj.status === TRIP_STATUS.ACTIVE) {
-        html += '<button class="btn btn-warning" onclick="MemberPage.markPending(\'' + _selectedTrip + '\')">送入待結帳</button>';
+        html += '<button class="btn btn-warning" onclick="MemberPage.markPending(\'' + _selectedTrip + '\')">傳帳給上級 · 送入待結帳</button>';
+      } else if (tripObj && tripObj.status === TRIP_STATUS.PENDING_SETTLEMENT) {
+        html += '<span style="font-size:13px;color:var(--warning);white-space:nowrap;">此團已送入待結帳，帳務已鎖定。</span>';
+        html += '<button class="btn btn-secondary" onclick="MemberPage.revertPending(\'' + _selectedTrip + '\')">撤回待結帳 · 重新編輯</button>';
       }
     }
     html += '</div>';
     html += '</div>';
+
+    /* v2.1 預支開銷區塊 */
+    if (_selectedTrip) {
+      var _selTrip = Trips.getById(_selectedTrip);
+      if (_selTrip) html += _pendSectionHtml(_selTrip);
+    }
 
     if (_selectedTrip) {
       var trip = Trips.getById(_selectedTrip);
@@ -5395,6 +5570,9 @@ var MemberPage = (function() {
   function showAddTx() {
     var trip = Trips.getById(_selectedTrip);
     if (!trip) return;
+    if (_txLocked()) return; // v1.9.11 待結帳/封存中不可新增帳務
+    _expContainerId = 'tx-expenses';
+    _expenseRows = [];
     /* 只顯示該團的會員（團 memberIds + 此團已有帳務的會員）；舊團無會員清單時 fallback 全部 */
     var tripMemberIds = {};
     (trip.memberIds || []).forEach(function(id) { tripMemberIds[id] = true; });
@@ -5435,10 +5613,12 @@ var MemberPage = (function() {
     html += '<div class="form-group"><label>返水2</label><input type="number" step="0.001" id="tx-rebate2" class="form-input" value="' + (defaultM.rebate2 || 0) + '"></div>';
     html += '</div>';
     html += '<div id="tx-expenses"></div>';
+    html += '<div id="tx-pendpool"></div>'; // v2.1 待歸屬預支開銷帶入區
     html += '<button class="btn-sm" onclick="MemberPage.addExpenseRow()">+ 開銷</button>';
     html += '<div style="text-align:right;margin-top:16px;">';
     html += '<button class="btn btn-primary" onclick="MemberPage.saveTx()">儲存</button></div>';
     Modal.open('新增帳務', html);
+    _renderPendPool();
   }
 
   function onMemberChange() {
@@ -5452,7 +5632,14 @@ var MemberPage = (function() {
   }
 
   var _expenseRows = [];
-
+  var _expContainerId = 'tx-expenses'; // 開銷行渲染容器可切換（帳務 tx-expenses / 預支 pend-exp-rows）
+  function _defaultExchangeRate() {
+    try {
+      var m = todayStr().slice(0, 7);
+      var r = Settings.getMonthlyRate(m);
+      return (r && r.exchangeRate) || 4.2;
+    } catch (e) { return 4.2; }
+  }
   function fmtNum(n) {
     var v = Math.round(n * 1000) / 1000;
     if (Math.abs(v - Math.round(v)) < 1e-6) return String(Math.round(v));
@@ -5495,15 +5682,16 @@ var MemberPage = (function() {
   }
 
   function addExpenseRow() {
-    _expenseRows.push({ name: '', ticketType: 'other', quantity: 1, unitPrice: 0, amountHK: 0, exchangeRate: 4.2 });
+    _expenseRows.push({ name: '', ticketType: 'other', quantity: 1, unitPrice: 0, amountHK: 0, exchangeRate: _defaultExchangeRate(), payout: 0, payoutManual: false });
     renderExpenseRows();
   }
   function renderExpenseRows() {
-    var container = document.getElementById('tx-expenses');
+    var container = document.getElementById(_expContainerId);
     if (!container) return;
     var tp = Settings.getTicketPrices();
     var html = '';
     _expenseRows.forEach(function(row, i) {
+      var pendTag = row.fromPend ? '<span style="font-size:11px;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:0 4px;margin-left:6px;white-space:nowrap;">預支帶入</span>' : '';
       html += '<div class="form-row expense-row" data-idx="' + i + '">';
       if (row.ticketType === 'roomfee') {
         /* 房費類型：固定顯示「房費」，不顯示下拉和名稱輸入 */
@@ -5519,9 +5707,9 @@ var MemberPage = (function() {
         html += '<option value="wp"' + (row.ticketType === 'wp' ? ' selected' : '') + '>水上樂園手帶 (' + wp.guestPrice + ')</option>';
         html += '</select>';
         if (row.ticketType === 'other' || !row.ticketType) {
-          html += '<input type="text" placeholder="項目名稱" class="form-input" style="flex:1;min-width:80px;" value="' + (row.name || '') + '" onchange="MemberPage._updExp(' + i + ',\'name\',this.value)">';
+          html += '<input type="text" placeholder="項目名稱" class="form-input" style="flex:1;min-width:80px;" value="' + (row.name || '') + '" onchange="MemberPage._updExp(' + i + ',\'name\',this.value)">' + pendTag;
         } else {
-          html += '<span style="flex:1;min-width:80px;display:flex;align-items:center;font-size:var(--font-size-sm);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (row.name || '') + '</span>';
+          html += '<span style="flex:1;min-width:80px;display:flex;align-items:center;font-size:var(--font-size-sm);color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (row.name || '') + pendTag + '</span>';
         }
       }
       html += '<input type="number" step="1" min="1" placeholder="數量" class="form-input" style="width:60px;flex:0 0 60px;" value="' + (row.quantity || 1) + '" oninput="MemberPage._updExp(' + i + ',\'quantity\',this.value)">';
@@ -5622,6 +5810,8 @@ var MemberPage = (function() {
   function editTx(txId) {
     var tx = MemberTxs.getById(txId);
     if (!tx) return;
+    if (_txLocked(tx)) return; // v1.9.11 待結帳/封存中不可編輯帳務
+    _expContainerId = 'tx-expenses';
     _expenseRows = (tx.expenses || []).map(function(e) { return Object.assign({}, e); });
 
     var html = '<div class="form-group"><label>會員: ' + tx.memberId + '</label></div>';
@@ -5651,11 +5841,13 @@ var MemberPage = (function() {
     html += '<div class="form-group"><label>返水2</label><input type="number" step="0.001" id="tx-rebate2" class="form-input" value="' + (tx.rebate2 || 0) + '"></div>';
     html += '</div>';
     html += '<div id="tx-expenses"></div>';
+    html += '<div id="tx-pendpool"></div>'; // v2.1 待歸屬預支開銷帶入區
     html += '<button class="btn-sm" onclick="MemberPage.addExpenseRow()">+ 開銷</button>';
     html += '<div style="text-align:right;margin-top:16px;">';
     html += '<button class="btn btn-primary" onclick="MemberPage.saveEditTx(\'' + txId + '\')">儲存</button></div>';
     Modal.open('編輯帳務', html);
     renderExpenseRows();
+    _renderPendPool();
   }
 
   function saveEditTx(txId) {
@@ -5681,6 +5873,8 @@ var MemberPage = (function() {
   }
 
   function delTx(txId) {
+    var _tx = MemberTxs.getById(txId);
+    if (_txLocked(_tx)) return; // v1.9.11 待結帳/封存中不可刪除帳務
     Modal.confirm('確定刪除此帳務記錄？', function() {
       MemberTxs.remove(txId);
       Toast.success('已刪除');
@@ -5688,14 +5882,296 @@ var MemberPage = (function() {
     });
   }
 
+  /* ===== 傳帳給上級＝送入待結帳（v1.9.3） ===== */
   function markPending(tripId) {
-    Modal.confirm('確定要將團 ' + tripId + ' 送入待結帳？\n送入後此團將無法再新增/修改帳務，需至「待結帳」頁面進行封存。', function() {
+    /* v2.1 守門：預支開銷未全部歸屬前不可傳帳（避免漏掉這筆錢） */
+    if (typeof PendExps !== 'undefined' && PendExps.hasUnclaimed(tripId)) {
+      Toast.error('本團尚有 ' + PendExps.unclaimedCount(tripId) + ' 筆預支開銷未歸屬，請先在帳務表單帶入或轉為純旅遊帳務');
+      return;
+    }
+    Modal.confirm('會產生結帳明細並分享給所屬上級（代理/股東），\n此團同時送入待結帳、帳務鎖定無法新增/修改\n（若有計算錯誤，可隨時在待結帳頁或此處撤回重編）。\n確定要傳帳？', function() {
       Trips.update(tripId, { status: TRIP_STATUS.PENDING_SETTLEMENT, lastSettlementDate: todayStr() });
-      Toast.success('團 ' + tripId + ' 已送入待結帳');
+      Toast.success('團 ' + tripId + ' 已傳帳並送入待結帳');
       _selectedTrip = null;
+      render();
+      /* 調出結帳明細分享面板（可複製貼給上級；不影響待結帳狀態） */
+      TripShare.openShareText(tripId);
+    });
+  }
+  /* v1.9.11 撤回待結帳：退回帳務頁恢復可編輯（計算錯誤時用；封存＝雙方確認才不可逆） */
+  function revertPending(tripId) {
+    Modal.confirm('將團 ' + tripId + ' 撤回帳務頁？\n撤回後帳務恢復可編輯，修正後需再次「傳帳給上級」。', function() {
+      var ok = Trips.revertPending(tripId);
+      Toast[ok ? 'success' : 'error'](ok ? '團 ' + tripId + ' 已撤回，可重新編輯帳務' : '撤回失敗（此團不在待結帳狀態）');
+      if (ok) render();
+    });
+  }
+  /* v1.9.11 帳務鎖定守門：非 active（待結帳/已封存）的團不可新增/修改/刪除帳務 */
+  function _txLocked(tx) {
+    var trip = tx && tx.tripId ? Trips.getById(tx.tripId) : Trips.getById(_selectedTrip);
+    if (trip && trip.status !== TRIP_STATUS.ACTIVE) {
+      Toast.error(trip.status === TRIP_STATUS.PENDING_SETTLEMENT
+        ? '此團已送入待結帳，請先「撤回待結帳」才能編輯'
+        : '此團已封存，不可修改帳務');
+      return true;
+    }
+    return false;
+  }
+
+  /* ===== 預支開銷（v2.1 先買先記，收工後歸屬） ===== */
+  function _rowPay(r) {
+    if (r.payout !== undefined && r.payout !== null) return r.payout || 0;
+    if (r.ourPrice !== undefined && r.ourPrice !== null && r.ticketType && r.ticketType !== 'other' && r.ticketType !== 'loan') return (r.ourPrice || 0) * (r.quantity || 1);
+    return r.amountHK || 0;
+  }
+  function _pendSectionHtml(trip) {
+    if (!trip || typeof PendExps === 'undefined') return '';
+    var pends = PendExps.getByTrip(trip.id);
+    var active = trip.status === TRIP_STATUS.ACTIVE;
+    var html = '<div class="card" style="margin-top:12px;">';
+    html += '<div class="card-header"><h3>預支開銷</h3>';
+    if (active) html += '<button class="btn btn-primary" style="margin-left:auto;" onclick="MemberPage.showAddPend()">＋ 新增預支開銷</button>';
+    html += '</div>';
+    html += '<div class="section-desc">先買先記：付款後立即登錄（錢包當下扣實支）；會員收工開帳務時逐行帶入，可細分數量給各會員。</div>';
+    if (!active && pends.length > 0) html += '<div style="padding:0 12px 8px;font-size:var(--font-size-sm);color:var(--warning);">此團已傳帳/封存，預支開銷鎖定。</div>';
+    if (pends.length === 0) html += '<div class="empty-state">尚無預支開銷</div>';
+    pends.forEach(function(p) {
+      var infos = PendExps.claimInfo(p);
+      var remaining = infos.filter(function(x) { return x.remaining > 0; }).length;
+      var payTotal = (typeof PendExps.payoutHKD === 'function') ? PendExps.payoutHKD(p) : 0;
+      html += '<div style="border:1px solid var(--border);border-radius:8px;margin:0 12px 12px;padding:10px;">';
+      html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
+      html += '<span style="font-weight:600;">' + escHtml(p.date || '') + '</span>';
+      if (p.note) html += '<span style="color:var(--text-secondary);">' + escHtml(p.note) + '</span>';
+      if (p.memberId) { var _m = Members.getById(p.memberId); html += '<span style="color:var(--text-secondary);">給 ' + escHtml(_m ? _m.id + (_m.name ? ' ' + _m.name : '') : p.memberId) + '</span>'; }
+      html += '<span style="' + (remaining > 0 ? 'color:var(--warning);' : 'color:var(--success);') + 'font-weight:600;">' + (remaining > 0 ? remaining + ' 項待歸屬' : '已全數歸屬') + '</span>';
+      html += '<span style="margin-left:auto;font-weight:600;">實支 ' + fmtCardNum(payTotal) + ' HK</span>';
+      html += '</div>';
+      html += '<table class="data-table" style="font-size:var(--font-size-sm);margin-top:8px;"><thead><tr><th>項目</th><th class="num">數量</th><th class="num">已歸屬</th><th class="num">金額HK</th><th class="num">實支HK</th></tr></thead><tbody>';
+      infos.forEach(function(x) {
+        var r = x.row;
+        html += '<tr' + (x.remaining > 0 ? '' : ' style="opacity:.55;"') + '>'
+          + '<td>' + escHtml(r.name || '(未命名)') + (r.absorbed ? ' <span style="color:var(--accent);font-size:11px;">代理吸收</span>' : '') + '</td>'
+          + '<td class="num">' + (r.quantity || 1) + '</td>'
+          + '<td class="num">' + x.claimed + '</td>'
+          + '<td class="num">' + fmtCardNum(r.amountHK || 0) + '</td>'
+          + '<td class="num">' + fmtCardNum(_rowPay(r)) + '</td>'
+          + '</tr>';
+      });
+      html += '</tbody></table>';
+      if (active) {
+        html += '<div style="margin-top:8px;text-align:right;">';
+        html += '<button class="btn-sm" onclick="MemberPage.editPend(\'' + p.id + '\')">編輯</button> ';
+        html += '<button class="btn-sm btn-danger" onclick="MemberPage.deletePend(\'' + p.id + '\')">刪除</button> ';
+        if (remaining > 0) html += '<button class="btn-sm btn-primary" onclick="MemberPage.toPureTour(\'' + p.id + '\')">轉為純旅遊帳務</button>';
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+  function _pendMemberOptionsHtml(trip, selected) {
+    var ids = (trip && trip.memberIds && trip.memberIds.length) ? trip.memberIds : null;
+    var list = ids ? Members.getAll().filter(function(m) { return ids.indexOf(m.id) >= 0; }) : Members.getAll();
+    var html = '<option value="">（不指定／之後再分）</option>';
+    list.forEach(function(m) {
+      html += '<option value="' + escHtml(m.id) + '"' + (selected === m.id ? ' selected' : '') + '>' + escHtml(m.id + (m.name ? ' ' + m.name : '')) + '</option>';
+    });
+    return html;
+  }
+  function showAddPend() {
+    var trip = Trips.getById(_selectedTrip);
+    if (!trip) { Toast.error('請先選擇團'); return; }
+    if (trip.status !== TRIP_STATUS.ACTIVE) { Toast.error('此團已傳帳/封存，不可新增預支'); return; }
+    _expenseRows = [];
+    _expContainerId = 'pend-exp-rows';
+    var html = '';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>日期</label><input type="date" id="pend-date" class="form-input" value="' + todayStr() + '"></div>';
+    html += '<div class="form-group"><label>備註（選填）</label><input type="text" id="pend-note" class="form-input" placeholder="例：猴哥團東哥購票"></div>';
+    html += '</div>';
+    html += '<div class="form-group"><label>會員（備註用，選填——帶入帳務時仍可細分給任何人）</label><select id="pend-member" class="form-input">' + _pendMemberOptionsHtml(trip, '') + '</select></div>';
+    html += '<div id="pend-exp-rows"></div>';
+    html += '<button class="btn-sm" onclick="MemberPage.addExpenseRow()">+ 開銷</button>';
+    html += '<div style="text-align:right;margin-top:16px;">';
+    html += '<button class="btn btn-primary" id="pend-save-btn" onclick="MemberPage.savePend()">儲存（錢包即扣實支）</button></div>';
+    Modal.open('預支開銷 · ' + Trips.displayName(trip), html);
+    renderExpenseRows();
+  }
+  function savePend() { _savePendCommon(null); }
+  function saveEditPend(pendId) { _savePendCommon(pendId); }
+  function _savePendCommon(editId) {
+    var dateEl = document.getElementById('pend-date');
+    var noteEl = document.getElementById('pend-note');
+    var rows = _expenseRows.filter(function(e) { return e.name || e.amountHK; });
+    if (rows.length === 0) { Toast.error('請至少加入一筆開銷'); return; }
+    var trip = Trips.getById(_selectedTrip);
+    var data = {
+      tripId: _selectedTrip,
+      agentId: trip ? (trip.agentId || '') : '',
+      shareholderId: trip ? (trip.shareholderId || '') : '',
+      memberId: (document.getElementById('pend-member') || {}).value || '',
+      date: dateEl ? dateEl.value : todayStr(),
+      note: noteEl ? (noteEl.value || '').trim() : '',
+      rows: rows.map(function(e) {
+        var r = Object.assign({}, e);
+        delete r.fromPend; /* 預支單本身不帶歸屬標記 */
+        r.quantity = r.quantity || 1;
+        return r;
+      }),
+    };
+    var btn = document.getElementById('pend-save-btn');
+    if (btn) btn.disabled = true;
+    var ok = editId ? PendExps.update(editId, data) : PendExps.create(data);
+    if (!ok) { Toast.error('儲存失敗，請檢查欄位'); if (btn) btn.disabled = false; return; }
+    Modal.close();
+    _expenseRows = [];
+    _expContainerId = 'tx-expenses';
+    Toast.success(editId ? '預支開銷已更新（錢包同步調整）' : '預支開銷已登錄，錢包已扣實支');
+    render();
+  }
+  function editPend(pendId) {
+    var p = PendExps.getById(pendId);
+    if (!p) return;
+    if (PendExps.isClaimed(p)) {
+      Toast.error('此預支單已有帳務帶入，不可編輯。如需修改，請先從帳務中移除該開銷行。');
+      return;
+    }
+    _expenseRows = (p.rows || []).map(function(e) { return Object.assign({}, e); });
+    _expContainerId = 'pend-exp-rows';
+    var html = '';
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label>日期</label><input type="date" id="pend-date" class="form-input" value="' + (p.date || todayStr()) + '"></div>';
+    html += '<div class="form-group"><label>備註（選填）</label><input type="text" id="pend-note" class="form-input" value="' + escHtml(p.note || '') + '"></div>';
+    html += '</div>';
+    html += '<div class="form-group"><label>會員（備註用，選填）</label><select id="pend-member" class="form-input">' + _pendMemberOptionsHtml(Trips.getById(p.tripId), p.memberId || '') + '</select></div>';
+    html += '<div id="pend-exp-rows"></div>';
+    html += '<button class="btn-sm" onclick="MemberPage.addExpenseRow()">+ 開銷</button>';
+    html += '<div style="text-align:right;margin-top:16px;">';
+    html += '<button class="btn btn-primary" id="pend-save-btn" onclick="MemberPage.saveEditPend(\'' + pendId + '\')">儲存</button></div>';
+    Modal.open('編輯預支開銷', html);
+    renderExpenseRows();
+  }
+  function deletePend(pendId) {
+    var p = PendExps.getById(pendId);
+    if (!p) return;
+    if (PendExps.isClaimed(p)) {
+      Toast.error('此預支單已有帳務帶入，不可刪除。請先從帳務中移除該開銷行。');
+      return;
+    }
+    Modal.confirm('刪除這筆預支開銷？\n錢包將加回已扣的實支金額。', function() {
+      PendExps.remove(pendId);
+      Toast.success('預支開銷已刪除，錢包已加回');
       render();
     });
   }
+  /* 純旅遊：預支單剩餘未歸屬的行 → 一鍵開零碼帳務（沿用交收/明細/封存全部機制） */
+  function toPureTour(pendId) {
+    var p = PendExps.getById(pendId);
+    if (!p) return;
+    var rest = PendExps.unclaimedRows(p.tripId).filter(function(x) { return x.pend.id === pendId; });
+    if (rest.length === 0) { Toast.error('此預支單已全數歸屬'); return; }
+    var trip = Trips.getById(p.tripId);
+    var memberPool = Members.getAll().filter(function(m) { return trip && trip.memberIds && trip.memberIds.indexOf(m.id) >= 0; });
+    if (memberPool.length === 0) memberPool = Members.getAll();
+    var html = '<div class="section-desc">為純旅遊（不開工）客人建立一筆零出回碼帳務，開銷直接掛在客人名下，交收照常計算。</div>';
+    html += '<div class="form-group"><label>會員</label>';
+    html += '<select id="pt-member" class="form-input">';
+    memberPool.forEach(function(m) {
+      html += '<option value="' + escHtml(m.id) + '">' + escHtml(m.id + ' ' + (m.name || '')) + '</option>';
+    });
+    html += '</select></div>';
+    html += '<div style="text-align:right;margin-top:16px;">';
+    html += '<button class="btn btn-primary" onclick="MemberPage._doPureTour(\'' + pendId + '\')">建立純旅遊帳務</button></div>';
+    Modal.open('轉為純旅遊帳務', html);
+  }
+  function _doPureTour(pendId) {
+    var p = PendExps.getById(pendId);
+    if (!p) return;
+    var memberId = document.getElementById('pt-member').value;
+    var m = Members.getById(memberId);
+    if (!m) { Toast.error('請選擇會員'); return; }
+    var rest = PendExps.unclaimedRows(p.tripId).filter(function(x) { return x.pend.id === pendId; });
+    if (rest.length === 0) { Toast.error('已無待歸屬開銷'); return; }
+    var expenses = rest.map(function(x) {
+      var orig = x.row, total = orig.quantity || 1, q = x.remaining;
+      var unitAmt = orig.unitPrice ? orig.unitPrice : (orig.amountHK || 0) / total;
+      var unitPay = (orig.payout !== undefined && orig.payout !== null) ? (orig.payout / total) : (orig.ourPrice !== undefined && orig.ourPrice !== null ? orig.ourPrice : unitAmt);
+      return {
+        name: orig.name, ticketType: orig.ticketType || 'other',
+        quantity: q, unitPrice: orig.unitPrice || 0, ourPrice: orig.ourPrice,
+        amountHK: Math.round(unitAmt * q * 100) / 100,
+        exchangeRate: orig.exchangeRate || _defaultExchangeRate(),
+        absorbed: !!orig.absorbed,
+        payout: Math.round(unitPay * q * 100) / 100, payoutManual: true,
+        fromPend: { pid: pendId, rid: orig.rid, qty: q }, /* 錢包已於預支時扣，不重複 */
+      };
+    });
+    var tx = MemberTxs.create({
+      tripId: p.tripId, memberId: memberId,
+      agentId: p.agentId || '', shareholderId: p.shareholderId || '',
+      vipHallId: '', date: todayStr(), source: 'manual',
+      pureTour: true, chipType: 'cash', outCode: 0, backCode: 0, washCode: 0,
+      customerUp: 0, customerDown: 0,
+      rate1: m.rate1 || 0, rebate1: 0, rate2: 0, rebate2: 0,
+      expenses: expenses,
+    });
+    if (!tx) { Toast.error('建立失敗'); return; }
+    Trips.update(p.tripId, { lastSettlementDate: todayStr() });
+    Modal.close();
+    Toast.success('已建立純旅遊帳務（' + memberId + '），開銷已歸屬');
+    render();
+  }
+  /* 帳務表單內：本團待歸屬預支開銷帶入區 */
+  function _renderPendPool() {
+    var el = document.getElementById('tx-pendpool');
+    if (!el || typeof PendExps === 'undefined') return;
+    var rows = PendExps.unclaimedRows(_selectedTrip);
+    if (!rows || rows.length === 0) { el.innerHTML = ''; return; }
+    var html = '<div style="border:1px dashed var(--accent);border-radius:8px;padding:8px;margin:8px 0;background:var(--bg-secondary);">';
+    html += '<div style="font-size:var(--font-size-sm);color:var(--accent);font-weight:600;margin-bottom:6px;">待歸屬預支開銷（本團，帶入後錢包不重複扣）</div>';
+    rows.forEach(function(x, i) {
+      var r = x.row;
+      var unitPay = (r.payout !== undefined && r.payout !== null) ? (r.payout / (r.quantity || 1)) : ((r.ourPrice !== undefined && r.ourPrice !== null) ? r.ourPrice : (r.amountHK || 0) / (r.quantity || 1));
+      html += '<div style="display:flex;align-items:center;gap:6px;margin:4px 0;">'
+        + '<span style="flex:1;font-size:var(--font-size-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(r.name || '(未命名)') + (r.absorbed ? ' <span style="color:var(--accent);">吸收</span>' : '') + '</span>'
+        + '<span style="font-size:11px;color:var(--text-secondary);white-space:nowrap;">實支 ' + fmtCardNum(Math.round(unitPay * 100) / 100) + ' HK/單位 · 剩餘 ' + x.remaining + '</span>'
+        + '<input type="number" min="1" max="' + x.remaining + '" value="' + x.remaining + '" id="pp-qty-' + i + '" class="form-input" style="width:64px;">'
+        + '<button class="btn-sm btn-primary" onclick="MemberPage._claimPendRow(' + i + ')">帶入</button>'
+        + '</div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  }
+  function _claimPendRow(i) {
+    var rows = PendExps.unclaimedRows(_selectedTrip);
+    var x = rows[i];
+    if (!x) return;
+    var qtyEl = document.getElementById('pp-qty-' + i);
+    var q = parseInt(qtyEl ? qtyEl.value : '') || 1;
+    q = Math.max(1, Math.min(q, x.remaining));
+    var orig = x.row, total = orig.quantity || 1;
+    var unitAmt = orig.unitPrice ? orig.unitPrice : (orig.amountHK || 0) / total;
+    var unitPay = (orig.payout !== undefined && orig.payout !== null) ? (orig.payout / total) : (orig.ourPrice !== undefined && orig.ourPrice !== null ? orig.ourPrice : unitAmt);
+    _expenseRows.push({
+      name: orig.name, ticketType: orig.ticketType || 'other',
+      quantity: q, unitPrice: orig.unitPrice || 0, ourPrice: orig.ourPrice,
+      amountHK: Math.round(unitAmt * q * 100) / 100,
+      exchangeRate: orig.exchangeRate || _defaultExchangeRate(),
+      absorbed: !!orig.absorbed,
+      payout: Math.round(unitPay * q * 100) / 100, payoutManual: true,
+      fromPend: { pid: x.pend.id, rid: orig.rid, qty: q },
+    });
+    renderExpenseRows();
+    _renderPendPool();
+    Toast.success('已帶入 ' + (orig.name || '開銷') + ' × ' + q);
+  }
+
+  /* 預支開銷同步後自動刷新 */
+  EventBus.on(EVENTS.PEXP_CREATED, function() { if (Router.getCurrent() === 'member') render(); });
+  EventBus.on(EVENTS.PEXP_UPDATED, function() { if (Router.getCurrent() === 'member') render(); });
+  EventBus.on(EVENTS.PEXP_DELETED, function() { if (Router.getCurrent() === 'member') render(); });
 
   return {
     render: render, selectTrip: selectTrip, selectAgent: selectAgent, switchTab: switchTab,
@@ -5703,7 +6179,9 @@ var MemberPage = (function() {
     editTx: editTx, saveEditTx: saveEditTx, delTx: delTx,
     addExpenseRow: addExpenseRow, _updExp: _updExp, _updExpType: _updExpType, _delExp: _delExp,
     calcUpDown: calcUpDown, calcWash: calcWash,
-    markPending: markPending,
+    markPending: markPending, revertPending: revertPending,
+    showAddPend: showAddPend, savePend: savePend, editPend: editPend, saveEditPend: saveEditPend, deletePend: deletePend,
+    toPureTour: toPureTour, _doPureTour: _doPureTour, _renderPendPool: _renderPendPool, _claimPendRow: _claimPendRow,
   };
 })();
 
@@ -6591,23 +7069,26 @@ var RoomPage = (function() {
     var html = '';
 
     /* 新增配置區（置頂，立即可見） */
-    var casinos0 = HotelConfig.getCasinos();
     html += '<div style="border-bottom:2px solid var(--border);padding-bottom:12px;margin-bottom:12px;">';
     html += '<h4 style="margin:0 0 8px;">\u2795 新增酒店配置</h4>';
     html += '<div class="form-row">';
-    html += '<div class="form-group"><label>體系</label><input type="text" id="hc-new-casino" class="form-input" placeholder="如: 金沙" list="hc-casino-list" oninput="RoomPage.onHcCasinoInput()"></div>';
-    html += '<div class="form-group"><label>酒店</label><input type="text" id="hc-new-hotel" class="form-input" placeholder="如: 倫敦人" list="hc-hotel-list" oninput="RoomPage.onHcHotelInput()"></div>';
+    html += '<div class="form-group" style="position:relative;"><label>體系（可選可輸入）</label><div style="position:relative;">';
+    html += '<input type="text" id="hc-new-casino" class="form-input" placeholder="如: 金沙" autocomplete="off" onfocus="RoomPage._hcOpen(\'hc-new-casino\')" oninput="RoomPage._hcFilter(\'hc-new-casino\')" onblur="RoomPage._hcClose(\'hc-new-casino\')">';
+    html += '<div class="hc-combo-panel" id="hc-new-casino-panel" style="display:none;position:absolute;z-index:120;top:100%;left:0;right:0;max-height:180px;overflow:auto;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.18);"></div>';
+    html += '</div></div>';
+    html += '<div class="form-group" style="position:relative;"><label>酒店（可選可輸入）</label><div style="position:relative;">';
+    html += '<input type="text" id="hc-new-hotel" class="form-input" placeholder="如: 倫敦人" autocomplete="off" onfocus="RoomPage._hcOpen(\'hc-new-hotel\')" oninput="RoomPage._hcFilter(\'hc-new-hotel\')" onblur="RoomPage._hcClose(\'hc-new-hotel\')">';
+    html += '<div class="hc-combo-panel" id="hc-new-hotel-panel" style="display:none;position:absolute;z-index:120;top:100%;left:0;right:0;max-height:180px;overflow:auto;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.18);"></div>';
+    html += '</div></div>';
     html += '</div>';
     html += '<div class="form-row">';
-    html += '<div class="form-group"><label>房型</label><input type="text" id="hc-new-room" class="form-input" placeholder="如: 名匯普通房" list="hc-room-list"></div>';
+    html += '<div class="form-group" style="position:relative;"><label>房型（可選可輸入）</label><div style="position:relative;">';
+    html += '<input type="text" id="hc-new-room" class="form-input" placeholder="如: 名匯普通房" autocomplete="off" onfocus="RoomPage._hcOpen(\'hc-new-room\')" oninput="RoomPage._hcFilter(\'hc-new-room\')" onblur="RoomPage._hcClose(\'hc-new-room\')">';
+    html += '<div class="hc-combo-panel" id="hc-new-room-panel" style="display:none;position:absolute;z-index:120;top:100%;left:0;right:0;max-height:180px;overflow:auto;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.18);"></div>';
+    html += '</div></div>';
     html += '<div class="form-group"><label>代碼</label><input type="text" id="hc-new-code" class="form-input" placeholder="如: RK"></div>';
     html += '<div class="form-group"><label>門檻(萬)</label><input type="number" id="hc-new-threshold" class="form-input" placeholder="如: 60" step="1" min="0"></div>';
     html += '</div>';
-    html += '<datalist id="hc-casino-list">';
-    casinos0.forEach(function(c) { html += '<option value="' + escHtml(c) + '">'; });
-    html += '</datalist>';
-    html += '<datalist id="hc-hotel-list"></datalist>';
-    html += '<datalist id="hc-room-list"></datalist>';
     html += '<div style="text-align:right;margin-top:8px;">';
     html += '<button class="btn btn-primary" onclick="RoomPage.saveNewHotelConfig()">新增</button>';
     html += '</div>';
@@ -6662,7 +7143,7 @@ var RoomPage = (function() {
     Toast.success('門檻已更新: ' + wan + '萬');
   }
 
-  /* ===== 新增表單：體系/酒店/房型 datalist 動態過濾 ===== */
+  /* ===== 新增表單：體系/酒店/房型 自訂下拉（點擊即彈出，可選可輸入） ===== */
   function _norm(s) { return String(s || '').replace(/\s+/g, ''); }
   function _allHotels() {
     var seen = {}, out = [];
@@ -6671,24 +7152,69 @@ var RoomPage = (function() {
     });
     return out;
   }
-  function onHcCasinoInput() {
-    var el = document.getElementById('hc-new-casino');
-    if (!el) return;
-    var casino = (el.value || '').trim();
-    /* 體系存在 → 只列該體系酒店；新體系 → 列全部酒店供參考 */
-    var hotels = HotelConfig.getHotels(casino);
-    if (hotels.length === 0) hotels = _allHotels();
-    var dl = document.getElementById('hc-hotel-list');
-    if (dl) dl.innerHTML = hotels.map(function(h) { return '<option value="' + escHtml(h) + '">'; }).join('');
-    var dr = document.getElementById('hc-room-list');
-    if (dr) dr.innerHTML = '';
+  function _hcField(field) {
+    return document.getElementById('hc-new-' + field);
   }
-  function onHcHotelInput() {
-    var casino = (document.getElementById('hc-new-casino') ? document.getElementById('hc-new-casino').value : '') || '';
-    var hotel = (document.getElementById('hc-new-hotel') ? document.getElementById('hc-new-hotel').value : '') || '';
-    var rooms = (casino && hotel) ? HotelConfig.getRooms(casino.trim(), hotel.trim()) : [];
-    var dr = document.getElementById('hc-room-list');
-    if (dr) dr.innerHTML = rooms.map(function(r) { return '<option value="' + escHtml(r.room) + '">'; }).join('');
+  /* 依目前輸入值計算候選清單：體系→全部體系；酒店→該體系酒店（無則全部）；房型→該體系+酒店房型 */
+  function _hcCandidates(field) {
+    var casino = (_hcField('casino') ? _hcField('casino').value : '') || '';
+    var hotel = (_hcField('hotel') ? _hcField('hotel').value : '') || '';
+    if (field === 'casino') return HotelConfig.getCasinos();
+    if (field === 'hotel') {
+      var list = HotelConfig.getHotels(casino.trim());
+      return (list && list.length > 0) ? list : _allHotels();
+    }
+    if (casino.trim() && hotel.trim()) return HotelConfig.getRooms(casino.trim(), hotel.trim());
+    return [];
+  }
+  function _hcOpen(inputId) {
+    var field = inputId.replace('hc-new-', '');
+    var panel = document.getElementById(inputId + '-panel');
+    var input = document.getElementById(inputId);
+    if (!panel || !input) return;
+    var q = (input.value || '').trim();
+    var opts = _hcCandidates(field);
+    if (!opts || opts.length === 0) { panel.style.display = 'none'; return; }
+    var html = opts.filter(function(o) {
+      return o && (!q || String(o).toLowerCase().indexOf(q.toLowerCase()) >= 0);
+    }).slice(0, 30).map(function(o) {
+      var v = String(o).replace(/'/g, '\\\'');
+      return '<div onmousedown="event.preventDefault();RoomPage._hcPick(\'' + inputId + '\',\'' + v + '\')" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:var(--font-size-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(o) + '</div>';
+    }).join('');
+    if (!html) { panel.style.display = 'none'; return; }
+    panel.innerHTML = html;
+    panel.style.display = 'block';
+    /* 同時只展開一個面板 */
+    ['casino', 'hotel', 'room'].forEach(function(f) {
+      var id = 'hc-new-' + f;
+      if (id !== inputId) {
+        var p = document.getElementById(id + '-panel');
+        if (p) p.style.display = 'none';
+      }
+    });
+  }
+  function _hcFilter(inputId) { _hcOpen(inputId); }
+  function _hcClose(inputId) {
+    /* blur 延遲關閉，確保 option 的 mousedown 先觸發 */
+    setTimeout(function() {
+      var panel = document.getElementById(inputId + '-panel');
+      if (panel) panel.style.display = 'none';
+    }, 150);
+  }
+  function _hcPick(inputId, val) {
+    var input = document.getElementById(inputId);
+    if (input) input.value = val;
+    var panel = document.getElementById(inputId + '-panel');
+    if (panel) panel.style.display = 'none';
+    /* 連動：選體系 → 清空酒店/房型並重列酒店候選；選酒店 → 清空房型並重列房型候選 */
+    if (inputId === 'hc-new-casino') {
+      var h = _hcField('hotel'); if (h) h.value = '';
+      var r = _hcField('room'); if (r) r.value = '';
+      _hcOpen('hc-new-hotel');
+    } else if (inputId === 'hc-new-hotel') {
+      var rr = _hcField('room'); if (rr) rr.value = '';
+      _hcOpen('hc-new-room');
+    }
   }
   /* 新增後捲動到新酒店區塊並高亮，讓「已加入該體系列表」一目了然 */
   function _scrollToHotelBlock(casino, hotel) {
@@ -6785,7 +7311,7 @@ var RoomPage = (function() {
     pushExpenseToMember: pushExpenseToMember,
     showHotelConfig: showHotelConfig, saveHotelThreshold: saveHotelThreshold,
     saveNewHotelConfig: saveNewHotelConfig, delHotelConfig: delHotelConfig,
-    onHcCasinoInput: onHcCasinoInput, onHcHotelInput: onHcHotelInput,
+    _hcOpen: _hcOpen, _hcFilter: _hcFilter, _hcClose: _hcClose, _hcPick: _hcPick,
     setCheckedOut: setCheckedOut, linkMember: linkMember, saveLinkMember: saveLinkMember,
   };
 })();
