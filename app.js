@@ -9090,11 +9090,21 @@ var WalletPage = (function() {
   }
 
   function typeName(t) {
+    /* 與 APP 端 _typeLabel（app.js:8768）對齊 — 業務可讀風格，避免用戶看到 credit_tx / pexp 等工程代碼 */
     var labels = {
-      'opening': '開帳', 'deposit': '補登', 'loan': '借支登記',
-      'repay': '借支回收', 'payout': '開銷墊付', 'adjust': '調整',
-      'manual': '手動', 'member_tx': '帳務衍生', 'credit_tx': '信用碼衍生',
-      'pexp': '預支衍生', 'loan_repay': '借支回收衍生',
+      'open': '開帳',
+      'opening': '開帳',         /* 兼容舊值 */
+      'deposit': '補登',
+      'manual': '補登',
+      'loan': '借支',
+      'repay': '借支回收',
+      'loan_repay': '借支回收',
+      'payout': '開銷墊付',
+      'expense': '開銷實支',
+      'adjust': '調整',
+      'member_tx': '現金碼',
+      'credit_tx': '信用碼超贏',
+      'pexp': '預支開銷',
     };
     return labels[t] || t || '';
   }
@@ -9131,12 +9141,14 @@ var WalletPage = (function() {
   }
 
   function typeOptions(selected, manualOnly) {
+    /* 與 typeName 同源（APP 業務風格） — 補登/編輯 walletTxs 表單用 */
     var manual = [
-      ['opening', '開帳'], ['deposit', '補登'], ['adjust', '調整'], ['manual', '手動'],
+      ['open', '開帳'], ['opening', '開帳（舊）'], ['deposit', '補登'], ['adjust', '調整'], ['manual', '手動補登'],
     ];
     var derived = [
-      ['member_tx', '帳務衍生'], ['credit_tx', '信用碼衍生'], ['pexp', '預支衍生'],
-      ['loan', '借支登記'], ['loan_repay', '借支回收衍生'], ['repay', '借支回收'], ['payout', '開銷墊付'],
+      ['member_tx', '現金碼衍生'], ['credit_tx', '信用碼超贏衍生'], ['pexp', '預支開銷衍生'],
+      ['loan', '借支衍生'], ['loan_repay', '借支回收衍生'], ['repay', '借支回收（舊）'], ['payout', '開銷墊付'],
+      ['expense', '開銷實支衍生'],
     ];
     var list = manualOnly ? manual : manual.concat(derived);
     var html = '';
