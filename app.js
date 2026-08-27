@@ -253,7 +253,6 @@ var PAGES = [
   { id: 'page-history',     name: 'history',     label: '歷史查詢',   icon: '\uD83D\uDD0D', shortcut: '7' },
   { id: 'page-reports',     name: 'reports',     label: '報表中心',   icon: '\uD83D\uDCC4', shortcut: '9' },
   { id: 'page-wallet',      name: 'wallet',      label: '錢包流水',   icon: '\uD83D\uDCB5', shortcut: '8' },
-  { id: 'page-agent',       name: 'agent',       label: '代理管理',   icon: '\uD83D\uDC65' },
   { id: 'page-audit-log',   name: 'auditLog',    label: '操作日誌',   icon: '\uD83D\uDCDC' },
   { id: 'page-settings',    name: 'settings',    label: '系統設定',   icon: '\u2699\uFE0F', shortcut: '0' },
 ];
@@ -7068,24 +7067,21 @@ var RoomPage = (function() {
     var prevScroll = keepScroll ? _hotelCfgScrollTop() : 0;
     var html = '';
 
-    /* 新增配置區（置頂，立即可見） */
+    /* 新增配置區（置頂，立即可見）— 原生 select 三級連動（與 APP 建團選單同模式），「其他」= 手動輸入新值 */
     html += '<div style="border-bottom:2px solid var(--border);padding-bottom:12px;margin-bottom:12px;">';
     html += '<h4 style="margin:0 0 8px;">\u2795 新增酒店配置</h4>';
     html += '<div class="form-row">';
-    html += '<div class="form-group" style="position:relative;"><label>體系（可選可輸入）</label><div style="position:relative;">';
-    html += '<input type="text" id="hc-new-casino" class="form-input" placeholder="如: 金沙" autocomplete="off" onfocus="RoomPage._hcOpen(\'hc-new-casino\')" oninput="RoomPage._hcFilter(\'hc-new-casino\')" onblur="RoomPage._hcClose(\'hc-new-casino\')">';
-    html += '<div class="hc-combo-panel" id="hc-new-casino-panel" style="display:none;position:absolute;z-index:120;top:100%;left:0;right:0;max-height:180px;overflow:auto;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.18);"></div>';
-    html += '</div></div>';
-    html += '<div class="form-group" style="position:relative;"><label>酒店（可選可輸入）</label><div style="position:relative;">';
-    html += '<input type="text" id="hc-new-hotel" class="form-input" placeholder="如: 倫敦人" autocomplete="off" onfocus="RoomPage._hcOpen(\'hc-new-hotel\')" oninput="RoomPage._hcFilter(\'hc-new-hotel\')" onblur="RoomPage._hcClose(\'hc-new-hotel\')">';
-    html += '<div class="hc-combo-panel" id="hc-new-hotel-panel" style="display:none;position:absolute;z-index:120;top:100%;left:0;right:0;max-height:180px;overflow:auto;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.18);"></div>';
-    html += '</div></div>';
+    html += '<div class="form-group"><label>體系</label>';
+    html += '<select id="hc-new-casino" class="form-input" onchange="RoomPage.onHcCasinoChange()">' + _hcCasinoOptionsHtml() + '</select>';
+    html += '<input type="text" id="hc-new-casino-manual" class="form-input" style="display:none;margin-top:6px;" placeholder="輸入新體系名，如: 金沙"></div>';
+    html += '<div class="form-group"><label>酒店</label>';
+    html += '<select id="hc-new-hotel" class="form-input" onchange="RoomPage.onHcHotelChange()">' + _hcHotelOptionsHtml('') + '</select>';
+    html += '<input type="text" id="hc-new-hotel-manual" class="form-input" style="display:none;margin-top:6px;" placeholder="輸入新酒店名，如: 倫敦人"></div>';
     html += '</div>';
     html += '<div class="form-row">';
-    html += '<div class="form-group" style="position:relative;"><label>房型（可選可輸入）</label><div style="position:relative;">';
-    html += '<input type="text" id="hc-new-room" class="form-input" placeholder="如: 名匯普通房" autocomplete="off" onfocus="RoomPage._hcOpen(\'hc-new-room\')" oninput="RoomPage._hcFilter(\'hc-new-room\')" onblur="RoomPage._hcClose(\'hc-new-room\')">';
-    html += '<div class="hc-combo-panel" id="hc-new-room-panel" style="display:none;position:absolute;z-index:120;top:100%;left:0;right:0;max-height:180px;overflow:auto;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.18);"></div>';
-    html += '</div></div>';
+    html += '<div class="form-group"><label>房型</label>';
+    html += '<select id="hc-new-room" class="form-input" onchange="RoomPage._hcToggleManual(\'room\')">' + _hcRoomOptionsHtml('', '') + '</select>';
+    html += '<input type="text" id="hc-new-room-manual" class="form-input" style="display:none;margin-top:6px;" placeholder="輸入新房型名，如: 名匯普通房"></div>';
     html += '<div class="form-group"><label>代碼</label><input type="text" id="hc-new-code" class="form-input" placeholder="如: RK"></div>';
     html += '<div class="form-group"><label>門檻(萬)</label><input type="number" id="hc-new-threshold" class="form-input" placeholder="如: 60" step="1" min="0"></div>';
     html += '</div>';
@@ -7143,7 +7139,8 @@ var RoomPage = (function() {
     Toast.success('門檻已更新: ' + wan + '萬');
   }
 
-  /* ===== 新增表單：體系/酒店/房型 自訂下拉（點擊即彈出，可選可輸入） ===== */
+  /* ===== 新增表單：體系/酒店/房型 原生 select 三級連動（與 APP 建團選單同模式） ===== */
+  var HC_OTHER = '__other__';
   function _norm(s) { return String(s || '').replace(/\s+/g, ''); }
   function _allHotels() {
     var seen = {}, out = [];
@@ -7152,69 +7149,64 @@ var RoomPage = (function() {
     });
     return out;
   }
-  function _hcField(field) {
-    return document.getElementById('hc-new-' + field);
-  }
-  /* 依目前輸入值計算候選清單：體系→全部體系；酒店→該體系酒店（無則全部）；房型→該體系+酒店房型 */
-  function _hcCandidates(field) {
-    var casino = (_hcField('casino') ? _hcField('casino').value : '') || '';
-    var hotel = (_hcField('hotel') ? _hcField('hotel').value : '') || '';
-    if (field === 'casino') return HotelConfig.getCasinos();
-    if (field === 'hotel') {
-      var list = HotelConfig.getHotels(casino.trim());
-      return (list && list.length > 0) ? list : _allHotels();
-    }
-    if (casino.trim() && hotel.trim()) return HotelConfig.getRooms(casino.trim(), hotel.trim());
-    return [];
-  }
-  function _hcOpen(inputId) {
-    var field = inputId.replace('hc-new-', '');
-    var panel = document.getElementById(inputId + '-panel');
-    var input = document.getElementById(inputId);
-    if (!panel || !input) return;
-    var q = (input.value || '').trim();
-    var opts = _hcCandidates(field);
-    if (!opts || opts.length === 0) { panel.style.display = 'none'; return; }
-    var html = opts.filter(function(o) {
-      return o && (!q || String(o).toLowerCase().indexOf(q.toLowerCase()) >= 0);
-    }).slice(0, 30).map(function(o) {
-      var v = String(o).replace(/'/g, '\\\'');
-      return '<div onmousedown="event.preventDefault();RoomPage._hcPick(\'' + inputId + '\',\'' + v + '\')" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:var(--font-size-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(o) + '</div>';
+  function _hcOptHtml(list) {
+    return (list || []).map(function(v) {
+      return '<option value="' + escHtml(v) + '">' + escHtml(v) + '</option>';
     }).join('');
-    if (!html) { panel.style.display = 'none'; return; }
-    panel.innerHTML = html;
-    panel.style.display = 'block';
-    /* 同時只展開一個面板 */
-    ['casino', 'hotel', 'room'].forEach(function(f) {
-      var id = 'hc-new-' + f;
-      if (id !== inputId) {
-        var p = document.getElementById(id + '-panel');
-        if (p) p.style.display = 'none';
-      }
-    });
   }
-  function _hcFilter(inputId) { _hcOpen(inputId); }
-  function _hcClose(inputId) {
-    /* blur 延遲關閉，確保 option 的 mousedown 先觸發 */
-    setTimeout(function() {
-      var panel = document.getElementById(inputId + '-panel');
-      if (panel) panel.style.display = 'none';
-    }, 150);
+  function _hcCasinoOptionsHtml() {
+    return '<option value="">— 選擇 —</option>' + _hcOptHtml(HotelConfig.getCasinos())
+      + '<option value="' + HC_OTHER + '">＋ 其他（手動輸入）</option>';
   }
-  function _hcPick(inputId, val) {
-    var input = document.getElementById(inputId);
-    if (input) input.value = val;
-    var panel = document.getElementById(inputId + '-panel');
-    if (panel) panel.style.display = 'none';
-    /* 連動：選體系 → 清空酒店/房型並重列酒店候選；選酒店 → 清空房型並重列房型候選 */
-    if (inputId === 'hc-new-casino') {
-      var h = _hcField('hotel'); if (h) h.value = '';
-      var r = _hcField('room'); if (r) r.value = '';
-      _hcOpen('hc-new-hotel');
-    } else if (inputId === 'hc-new-hotel') {
-      var rr = _hcField('room'); if (rr) rr.value = '';
-      _hcOpen('hc-new-room');
+  function _hcHotelOptionsHtml(casino) {
+    var list = casino ? HotelConfig.getHotels(casino) : [];
+    if (!list.length) list = _allHotels(); /* 新體系尚無酒店時仍可選既有酒店名（跨體系同名） */
+    return '<option value="">— 選擇 —</option>' + _hcOptHtml(list)
+      + '<option value="' + HC_OTHER + '">＋ 其他（手動輸入）</option>';
+  }
+  function _hcRoomOptionsHtml(casino, hotel) {
+    var list = (casino && hotel) ? HotelConfig.getRooms(casino, hotel).map(function(r) { return r.room; }) : [];
+    return '<option value="">— 選擇 —</option>' + _hcOptHtml(list)
+      + '<option value="' + HC_OTHER + '">＋ 其他（手動輸入）</option>';
+  }
+  /* 取欄位實際值：選「其他」時讀手動輸入框 */
+  function _hcSelVal(field) {
+    var sel = document.getElementById('hc-new-' + field);
+    if (!sel) return '';
+    if (sel.value === HC_OTHER) {
+      var m = document.getElementById('hc-new-' + field + '-manual');
+      return m ? m.value.trim() : '';
     }
+    return sel.value.trim();
+  }
+  function _hcToggleManual(field) {
+    var sel = document.getElementById('hc-new-' + field);
+    var man = document.getElementById('hc-new-' + field + '-manual');
+    if (man) man.style.display = (sel && sel.value === HC_OTHER) ? 'block' : 'none';
+  }
+  /* 選體系 → 重列酒店候選並清空房型 */
+  function onHcCasinoChange() {
+    _hcToggleManual('casino');
+    var casino = _hcSelVal('casino');
+    var hotelSel = document.getElementById('hc-new-hotel');
+    if (hotelSel) hotelSel.innerHTML = _hcHotelOptionsHtml(casino);
+    var hotelMan = document.getElementById('hc-new-hotel-manual');
+    if (hotelMan) hotelMan.value = '';
+    _hcToggleManual('hotel');
+    var roomSel = document.getElementById('hc-new-room');
+    if (roomSel) roomSel.innerHTML = _hcRoomOptionsHtml('', '');
+    var roomMan = document.getElementById('hc-new-room-manual');
+    if (roomMan) roomMan.value = '';
+    _hcToggleManual('room');
+  }
+  /* 選酒店 → 重列房型候選 */
+  function onHcHotelChange() {
+    _hcToggleManual('hotel');
+    var roomSel = document.getElementById('hc-new-room');
+    if (roomSel) roomSel.innerHTML = _hcRoomOptionsHtml(_hcSelVal('casino'), _hcSelVal('hotel'));
+    var roomMan = document.getElementById('hc-new-room-manual');
+    if (roomMan) roomMan.value = '';
+    _hcToggleManual('room');
   }
   /* 新增後捲動到新酒店區塊並高亮，讓「已加入該體系列表」一目了然 */
   function _scrollToHotelBlock(casino, hotel) {
@@ -7233,9 +7225,9 @@ var RoomPage = (function() {
   }
 
   function saveNewHotelConfig() {
-    var casino = document.getElementById('hc-new-casino').value.trim();
-    var hotel = document.getElementById('hc-new-hotel').value.trim();
-    var room = document.getElementById('hc-new-room').value.trim();
+    var casino = _hcSelVal('casino');
+    var hotel = _hcSelVal('hotel');
+    var room = _hcSelVal('room');
     var code = document.getElementById('hc-new-code').value.trim();
     var wan = parseFloat(document.getElementById('hc-new-threshold').value) || 0;
 
@@ -7311,7 +7303,7 @@ var RoomPage = (function() {
     pushExpenseToMember: pushExpenseToMember,
     showHotelConfig: showHotelConfig, saveHotelThreshold: saveHotelThreshold,
     saveNewHotelConfig: saveNewHotelConfig, delHotelConfig: delHotelConfig,
-    _hcOpen: _hcOpen, _hcFilter: _hcFilter, _hcClose: _hcClose, _hcPick: _hcPick,
+    onHcCasinoChange: onHcCasinoChange, onHcHotelChange: onHcHotelChange, _hcToggleManual: _hcToggleManual,
     setCheckedOut: setCheckedOut, linkMember: linkMember, saveLinkMember: saveLinkMember,
   };
 })();
@@ -8371,9 +8363,9 @@ var AgentPage = (function() {
     render();
   }
 
-  // 帳務數據同步後自動刷新
+  // 帳務數據同步後自動刷新（渲染目標容器不存在時為 no-op）
   EventBus.on(EVENTS.MTX_LOADED, function() {
-    if (Router.getCurrent() === 'agent') render();
+    render();
   });
 
   return {
@@ -11013,7 +11005,6 @@ function onPageChange(pageName) {
     'room':        function() { RoomPage.render(); },
     'fees':        function() { FeesPage.render(); },
     'profit':      function() { ProfitPage.render(); },
-    'agent':       function() { AgentPage.render(); },
     'shareholder': function() { ShareholderPage.render(); },
     'membersMgmt': function() { MembersMgmtPage.render(); },
     'history':     function() { HistoryPage.render(); },
