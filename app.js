@@ -2275,12 +2275,15 @@ var Trips = (function() {
     if (!trip) return null;
     var lastDate = trip.lastSettlementDate || trip.startDate;
     var sealedMonth = lastDate ? lastDate.substring(0, 7) : currentMonthStr();
-    return update(id, {
+    var updated = update(id, {
       status: TRIP_STATUS.SEALED,
       endDate: todayStr(),
       sealedAt: Date.now(),
       sealedMonth: sealedMonth,
     });
+    /* v1.6.3 級聯封存：該團關聯訂房一併綁定團並標記 sealedAt，讓房務明細跟著團封存 */
+    _cascadeSealBookingsForTrip(id);
+    return updated;
   }
   /* v1.9.11 撤回待結帳：退回 active 恢復可編輯（交收完成封存前都可反悔） */
   function revertPending(id) {
@@ -2302,6 +2305,9 @@ var Trips = (function() {
     /* v1.6.1 級聯刪除該團所有 booking：避免「房間使用額度」孤兒留在雲端繼續計入配額
        （以墓碑方式標記，保留追蹤，並上傳雲端） */
     _cascadeDeleteBookingsForTrip(id);
+    /* v1.6.3 級聯刪除該團所有預支單（含衍生錢包流水）：
+       避免孤兒預支被 APP 對帳機制重建錢包流水，導致已刪資料復活 */
+    _cascadeDeletePendExpsForTrip(id);
   }
   /* 級聯刪除指定團的所有 booking */
   function _cascadeDeleteBookingsForTrip(tripId) {
@@ -2321,6 +2327,40 @@ var Trips = (function() {
     });
     if (typeof Bookings.save === 'function') Bookings.save(fullArr);
     if (Object.keys(payloads).length > 0 && typeof enqueue === 'function') enqueue(FB_PATH.BOOKINGS, payloads);
+  }
+  /* v1.6.3 級聯封存指定團的所有訂房：
+     - 有 tripId 且屬於該團 → 標記 sealedAt
+     - 無 tripId（Bot 訂房）但會員屬於該團 → 補綁 tripId + sealedAt
+     封存後由 filterActiveBookings 排除（房務明細跟著團封存）；代理配額含封存口徑照算 */
+  function _cascadeSealBookingsForTrip(tripId) {
+    if (typeof Bookings === 'undefined' || !Bookings) return;
+    var trip = getById(tripId);
+    if (!trip) return;
+    var memberIds = {};
+    (trip.memberIds || []).forEach(function(mid) { memberIds[mid] = true; });
+    var now = Date.now();
+    var payloads = {};
+    var fullArr = State.get('bookings') || [];
+    fullArr.forEach(function(b) {
+      if (!b || b._deleted) return;
+      var linked = (b.tripId === tripId) || (!b.tripId && b.memberId && memberIds[b.memberId]);
+      if (!linked) return;
+      b.tripId = tripId;
+      b.sealedAt = now;
+      b._updatedAt = now;
+      if (b._fbKey) payloads[b._fbKey] = b;
+    });
+    if (Object.keys(payloads).length > 0) {
+      if (typeof Bookings.save === 'function') Bookings.save(fullArr);
+      if (typeof enqueue === 'function') enqueue(FB_PATH.BOOKINGS, payloads);
+    }
+  }
+  /* v1.6.3 級聯刪除指定團的所有預支單（PendExps.remove 會連動刪除衍生錢包流水） */
+  function _cascadeDeletePendExpsForTrip(tripId) {
+    if (typeof PendExps === 'undefined' || !PendExps || typeof PendExps.getByTrip !== 'function') return;
+    (PendExps.getByTrip(tripId) || []).forEach(function(p) {
+      if (p && p.id && typeof PendExps.remove === 'function') PendExps.remove(p.id);
+    });
   }
   /* v2.1 顯示名稱（與 APP 一致）：T20260823 · 猴哥團東哥（無備註只顯示 ID） */
   function displayName(tripOrId) {
@@ -2976,9 +3016,8 @@ var HotelConfig = (function() {
  *  - 手動型（opening/deposit/adjust/manual，_fbKey 開頭 wtx_open_/wtx_m_）
  *    可安全編輯/刪除，Web 端為唯一真相來源。
  *  - 衍生型（wtx_mtx_/wtx_pexp_/wtx_loan_/wtx_loanr_，由 APP 端 Wallet.syncForTx
- *    自 memberTx/pendingExp/loan 產生）。Web 端可編輯/刪除，但 APP 端 reconcileAll
- *    會從來源重建 → 刪除可能被復原。若要真正移除衍生流水，應刪除來源
- *    （會員帳務/借支/預支），非從錢包流水頁操作。
+ *    自 memberTx/pendingExp/loan 產生）。Web 端可編輯/刪除；v1.6.3 起刪除（墓碑）
+ *    後不會被來源重建（刪除永遠贏）。
  */
 var WalletTxs = (function() {
   function load() {
@@ -3055,8 +3094,9 @@ var WalletTxs = (function() {
     var idx = arr.findIndex(function(w) { return w.id === id; });
     var now = Date.now();
     if (idx >= 0 && arr[idx]._deleted) {
-      /* 曾被刪除的衍生流水：來源仍在變動時重建（與 APP reconcileAll 行為一致） */
-      arr[idx]._deleted = false;
+      /* v1.6.3 衍生流水已被刪除（墓碑）→ 不從來源重建，避免刪除後復活
+         （刪除永遠贏：要真正恢復請重新建立來源預支單） */
+      return null;
     }
     var item = idx >= 0 ? Object.assign({}, arr[idx], data) : Object.assign({ id: id }, data);
     item.id = id;
