@@ -9250,6 +9250,8 @@ var MembersMgmtPage = (function() {
 var HistoryPage = (function() {
   var _expandedTrips = {}; // 記錄哪些團已展開
   var _expandedMonths = {}; // 記錄哪些月份已展開
+  var _selectedMonth = null; // 查對月份（預設當月；過月資料需切換月份查看）
+  var SEAL_RETENTION_MONTHS = 6; // 封存保留上限：未手動刪除最多保留 6 個月
 
   // ===== 工具函數（與 pending.js 一致） =====
   function fmtCardNum(n) {
@@ -9277,13 +9279,36 @@ var HistoryPage = (function() {
   function render() {
     var sealedTrips = Trips.getAll().filter(function(t) { return t.status === TRIP_STATUS.SEALED; });
     var html = '<div class="card">';
-    html += '<div class="card-header"><h3>歷史查詢（已封存團）</h3></div>';
+    html += '<div class="card-header"><h3>歷史查詢（已封存團）</h3>';
+    html += '<div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
+    html += '<span style="font-size:var(--font-size-sm);color:var(--text-secondary);">查對月份</span>';
+    html += '<select class="form-input" style="width:auto;" onchange="HistoryPage.selectMonth(this.value)">';
+
+    // 全部月份清單（有封存資料的月份，倒序）
+    var monthSet = {};
+    sealedTrips.forEach(function(trip) {
+      var month = trip.sealedMonth || (trip.endDate || '').substring(0, 7) || '未分類';
+      monthSet[month] = true;
+    });
+    var allMonths = Object.keys(monthSet).sort().reverse();
+    // 預設顯示當月（當月無封存資料則顯示最近一個有資料的月份）
+    if (!_selectedMonth) {
+      var cur = currentMonthStr();
+      _selectedMonth = monthSet[cur] ? cur : (allMonths[0] || cur);
+    }
+    allMonths.forEach(function(month) {
+      html += '<option value="' + month + '"' + (_selectedMonth === month ? ' selected' : '') + '>' + month + '</option>';
+    });
+    html += '</select>';
+    html += '</div>';
+    html += '</div>';
+    html += '<div class="section-desc">已封存團依「封存月份」顯示，過月份的資料不再出現在當月明細中（切換上方月份即可查對）；未手動刪除最多保留 ' + SEAL_RETENTION_MONTHS + ' 個月，逾期自動刪除。</div>';
 
     if (sealedTrips.length === 0) {
       html += '<div class="empty-state">無封存的團</div>';
       html += '</div>';
-      var container = document.getElementById('page-history');
-      if (container) container.innerHTML = html;
+      var container0 = document.getElementById('page-history');
+      if (container0) container0.innerHTML = html;
       return;
     }
 
@@ -9296,7 +9321,11 @@ var HistoryPage = (function() {
     });
 
     var sortedMonths = Object.keys(byMonth).sort().reverse();
+    var _matched = false;
     sortedMonths.forEach(function(month) {
+      /* v1.5.5 月份查對：只顯示目前選擇的月份，過月資料不混入當月明細 */
+      if (month !== _selectedMonth) return;
+      _matched = true;
       var trips = byMonth[month];
       var monthWash = 0;
       var monthSettle = 0;
@@ -9345,6 +9374,9 @@ var HistoryPage = (function() {
       html += '</div>'; // ht-month-content
       html += '</div>'; // ht-month-group
     });
+
+    /* 選擇的月份已無封存資料（例如刪除後） */
+    if (!_matched) html += '<div class="empty-state">' + _selectedMonth + ' 無封存的團</div>';
 
     html += '</div>';
 
@@ -9456,6 +9488,8 @@ var HistoryPage = (function() {
     html += '<div class="mb-ap-stat"><label>會員數</label><span>' + memberCount + '</span></div>';
     html += '</div>';
     html += '<span class="ht-sealed-badge">已封存</span>';
+    /* v1.5.5 已封存帳務可刪除：整團（含帳務/訂房/補款/預支）一併刪除 */
+    html += '<button class="btn-sm btn-danger" onclick="HistoryPage.deleteSealedTrip(\'' + trip.id + '\')">刪除</button>';
     html += '</div>';
 
     html += '</div>'; // pd-card-body
@@ -9516,6 +9550,8 @@ var HistoryPage = (function() {
       html += '<div class="mb-card-header">';
       html += '<div class="mb-card-hall">' + hallName + (tx.date ? ' · ' + tx.date : '') + '</div>';
       html += '<div class="mb-card-member">#' + (idx + 1) + '</div>';
+      /* v1.5.5 已封存帳務可逐筆刪除 */
+      html += '<button class="btn-sm btn-danger" style="margin-left:auto;" onclick="HistoryPage.deleteSealedTx(\'' + tx.id + '\')">刪除</button>';
       html += '</div>';
 
       // 第一區：出碼、回碼、上下分
@@ -9582,7 +9618,87 @@ var HistoryPage = (function() {
     Modal.open('會員明細', html);
   }
 
-  return { render: render, toggleMonth: toggleMonth, toggleCard: toggleCard, showMemberDetail: showMemberDetail };
+  /* ===== v1.5.5 月份查對 + 已封存帳務刪除 + 6 個月保留 ===== */
+  function selectMonth(month) {
+    _selectedMonth = month;
+    render();
+  }
+
+  /* 級聯刪除：團 + 帳務 + 訂房 + 補款 + 預支（墓碑 + 同步 Firebase） */
+  function _cascadeDeleteTrip(tripId) {
+    MemberTxs.getByTrip(tripId).forEach(function(t) { MemberTxs.remove(t.id); });
+    Bookings.getByTrip(tripId).forEach(function(b) { Bookings.remove(b.id); });
+    Supplements.getByTrip(tripId).forEach(function(s) { Supplements.remove(s.id); });
+    if (typeof PendExps !== 'undefined' && PendExps.getByTrip) {
+      PendExps.getByTrip(tripId).forEach(function(p) { PendExps.remove(p.id); });
+    }
+    Trips.remove(tripId);
+  }
+
+  /* 刪除整個已封存團（含全部帳務資料） */
+  function deleteSealedTrip(tripId) {
+    var trip = Trips.getById(tripId);
+    if (!trip || trip.status !== TRIP_STATUS.SEALED) { Toast.error('僅已封存的團可在此刪除'); return; }
+    Modal.confirm('確定刪除已封存團 ' + tripId + '？\n此團全部帳務、訂房、補款、預支資料將一併刪除，不可還原。', function() {
+      _cascadeDeleteTrip(tripId);
+      if (typeof AuditLog !== 'undefined') AuditLog.log('trips', 'delete', tripId, '刪除已封存團（含帳務/訂房/補款/預支）');
+      Toast.success('已刪除封存團 ' + tripId);
+      render();
+    });
+  }
+
+  /* 刪除已封存團內的單筆帳務 */
+  function deleteSealedTx(txId) {
+    var tx = MemberTxs.getById(txId);
+    if (!tx) return;
+    var trip = Trips.getById(tx.tripId);
+    if (!trip || trip.status !== TRIP_STATUS.SEALED) { Toast.error('此帳務所屬團未封存，請至帳務頁刪除'); return; }
+    Modal.confirm('刪除此筆帳務（會員 ' + tx.memberId + '）？\n刪除後不可還原。', function() {
+      var tripId = tx.tripId, memberId = tx.memberId;
+      MemberTxs.remove(txId);
+      if (typeof AuditLog !== 'undefined') AuditLog.log('memberTxs', 'delete', txId, '刪除已封存團帳務（會員 ' + memberId + '）');
+      Toast.success('已刪除該筆帳務');
+      Modal.close();
+      render();
+      showMemberDetail(tripId, memberId); // 重新打開該會員明細
+    });
+  }
+
+  /* YYYY-MM 位移 delta 個月 */
+  function _monthShift(ym, delta) {
+    var p = String(ym || '').split('-');
+    var y = parseInt(p[0], 10), m = parseInt(p[1], 10);
+    if (!y || !m) return '';
+    var d = new Date(y, m - 1 + delta, 1);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  }
+
+  /* 封存保留 6 個月：未手動刪除者逾期自動刪除（含帳務/訂房/補款/預支） */
+  function purgeExpiredSealed() {
+    var cutoff = _monthShift(currentMonthStr(), -(SEAL_RETENTION_MONTHS - 1));
+    if (!cutoff) return 0;
+    var expired = Trips.getAll().filter(function(t) {
+      if (t.status !== TRIP_STATUS.SEALED) return false;
+      var sm = t.sealedMonth || (t.sealedAt ? dateStrFromTs(t.sealedAt).substring(0, 7) : '');
+      return !!sm && sm < cutoff;
+    });
+    expired.forEach(function(t) {
+      _cascadeDeleteTrip(t.id);
+      if (typeof AuditLog !== 'undefined') AuditLog.log('trips', 'delete', t.id, '封存滿 ' + SEAL_RETENTION_MONTHS + ' 個月自動刪除（' + (t.sealedMonth || '') + '）');
+    });
+    return expired.length;
+  }
+
+  return {
+    render: render,
+    toggleMonth: toggleMonth,
+    toggleCard: toggleCard,
+    showMemberDetail: showMemberDetail,
+    selectMonth: selectMonth,
+    deleteSealedTrip: deleteSealedTrip,
+    deleteSealedTx: deleteSealedTx,
+    purgeExpiredSealed: purgeExpiredSealed,
+  };
 })();
 
 
@@ -11061,6 +11177,11 @@ function loadAllData() {
   /* EMPLOYEE_LIST: 物件結構，直接從 localStorage 讀取 */
   State.set('employeeList', Store.read(STORAGE_KEYS.EMPLOYEE_LIST) || {});
   RecentlyDeleted.init();
+  /* v1.5.5 封存保留 6 個月：逾期封存團自動刪除（含帳務/訂房/補款/預支，同步 Firebase） */
+  try {
+    var _purged = HistoryPage.purgeExpiredSealed();
+    if (_purged > 0) console.log('[App] 已自動刪除 ' + _purged + ' 個逾期封存團（滿 6 個月）');
+  } catch (e) { console.error('[App] 封存保留清理失敗', e); }
 }
 
 function initApp() {
