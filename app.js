@@ -1448,14 +1448,20 @@ if (typeof module !== 'undefined' && module.exports) {
 /**
  * sync/merger.js — 墓碑永远赢的合并器
  * 依赖: 无
- * 规则: 墓碑(_deleted=true)永远赢 > 时间戳决胜 > 取联集
+ * 规则: 墓碑(_deleted=true)永远赢 > 封存(sealed)保护 > 时间戳决胜 > 取联集
+ *
+ * 封存保护（v1.6.7）：collection === 'trips' 时，若一端 status=sealed 而另一端不是，
+ * sealed 一方永远赢（不管时间戳）。封存是不可逆动作，任何一端的旧状态
+ * 都不得把另一端已封存的团「复原」回 active/pending。
+ * 这是「WEB 封存 → APP 不同步 / APP 旧数据盖回云封存」连锁故障的源头防御。
  */
 
-function mergeArray(local, remote) {
+function mergeArray(local, remote, collection) {
   var localArr = local || [];
   var remoteArr = remote || [];
   var map = {};
   var result = [];
+  var isTrips = collection === 'trips';
 
   localArr.forEach(function(item) {
     if (item && item._fbKey) map[item._fbKey] = item;
@@ -1474,7 +1480,17 @@ function mergeArray(local, remote) {
       // 本地已是墓碑，保持墓碑
       // map[rItem._fbKey] 已是 lItem (墓碑)
     } else {
-      // 两者都活着 → 时间戳决胜
+      // 两者都活着
+      if (isTrips) {
+        var lSealed = lItem.status === 'sealed';
+        var rSealed = rItem.status === 'sealed';
+        if (lSealed !== rSealed) {
+          // 封存保护：sealed 一方永远赢
+          map[rItem._fbKey] = lSealed ? lItem : rItem;
+          return;
+        }
+      }
+      // → 时间戳决胜
       var lTs = lItem._updatedAt || 0;
       var rTs = rItem._updatedAt || 0;
       map[rItem._fbKey] = rTs >= lTs ? rItem : lItem;
@@ -1715,8 +1731,8 @@ function syncUploadAll(dataMap) {
         var remoteObj = remoteVal || {};
         var remoteArr = Object.keys(remoteObj).map(function(k) { return remoteObj[k]; });
 
-        // 1) 合併：墓碑永遠贏 > 時間戳決勝 > 聯集
-        var merged = mergeArray(data, remoteArr);
+        // 1) 合併：墓碑永遠贏 > 封存保護 > 時間戳決勝 > 聯集
+        var merged = mergeArray(data, remoteArr, key === 'TRIPS' ? 'trips' : undefined);
 
         // MEMBER_TXS：合併後重新計算衍生欄位（與 watchers 一致）
         if (key === 'MEMBER_TXS' && typeof calcMemberTx === 'function') {
@@ -1741,6 +1757,9 @@ function syncUploadAll(dataMap) {
           } else if (item._deleted) {
             // 本地墓碑、雲端活資料 → 上傳墓碑，確保雲端執行刪除
             toUpload[item._fbKey] = item;
+          } else if (key === 'TRIPS' && rItem.status === 'sealed' && item.status !== 'sealed') {
+            // v1.6.7 封存保護：雲端已封存、本地是舊狀態 → 不得上傳覆蓋（封存不可逆）
+            return;
           } else if ((item._updatedAt || 0) > (rItem._updatedAt || 0)) {
             // 兩者皆活、本地較新 → 上傳
             toUpload[item._fbKey] = item;
@@ -1845,7 +1864,7 @@ function _setupWatchers() {
       try {
         var local = Store.readArray(w.storeKey);
         var remote = remoteVal ? Object.values(remoteVal) : [];
-        var merged = mergeArray(local, remote);
+        var merged = mergeArray(local, remote, w.stateKey);
 
         /* MEMBER_TXS: Bot 只寫入 outCode/backCode/washCode��需重新計算衍生欄位 */
         if (w.key === 'MEMBER_TXS' && typeof calcMemberTx === 'function') {
@@ -1985,7 +2004,7 @@ function _resyncAll() {
       var local = Store.readArray(cfg.storeKey);
       var remote = remoteVal ? Object.values(remoteVal) : [];
       if (remote.length === 0) return; // 無遠端數據，不覆蓋
-      var merged = mergeArray(local, remote);
+      var merged = mergeArray(local, remote, cfg.stateKey);
 
       // MEMBER_TXS 需要重新計算衍生欄位
       if (cfg.event === EVENTS.MTX_LOADED && typeof calcMemberTx === 'function') {
@@ -5365,6 +5384,9 @@ var PendingPage = (function() {
     });
   }
 
+  // v1.6.7 團數據同步後自動刷新（WEB/APP 任一端封存 → 待結帳列表即時移除該團）
+  EventBus.on(EVENTS.TRIPS_LOADED, function() { render(); });
+
   return { render: render, sealTrip: sealTrip, toggleCard: toggleCard, showMemberDetail: showMemberDetail, revertPending: revertPending };
 })();
 
@@ -5607,6 +5629,11 @@ var MemberPage = (function() {
 
   // 帳務數據同步後自動刷新
   EventBus.on(EVENTS.MTX_LOADED, function() {
+    if (Router.getCurrent() === 'member') render();
+  });
+
+  // v1.6.7 團數據同步後自動刷新（WEB 封存/建團/異動 → 帳務頁即時反映）
+  EventBus.on(EVENTS.TRIPS_LOADED, function() {
     if (Router.getCurrent() === 'member') render();
   });
 
@@ -7516,6 +7543,10 @@ var RoomPage = (function() {
     render();
   }
 
+  // v1.6.7 團/訂房數據同步後自動刷新（WEB 封存團 → 房務頁即時反映；選中團被封存會自動清除選擇）
+  EventBus.on(EVENTS.TRIPS_LOADED, function() { render(); });
+  EventBus.on(EVENTS.BOOKINGS_LOADED, function() { render(); });
+
   return {
     render: render, selectTrip: selectTrip,
     showAddBooking: showAddBooking, onCasinoChange: onCasinoChange, onHotelChange: onHotelChange,
@@ -8595,6 +8626,11 @@ var AgentPage = (function() {
     render();
   });
 
+  // v1.6.7 團數據同步後自動刷新（封存/建團異動 → 代理面板即時反映）
+  EventBus.on(EVENTS.TRIPS_LOADED, function() {
+    render();
+  });
+
   return {
     render: render,
     showAdd: showAdd,
@@ -9253,6 +9289,11 @@ var ShareholderPage = (function() {
 
   // 帳務數據同步後自動刷新
   EventBus.on(EVENTS.MTX_LOADED, function() {
+    if (Router.getCurrent() === 'shareholder') render();
+  });
+
+  // v1.6.7 團數據同步後自動刷新（封存異動 → 股東分潤即時反映）
+  EventBus.on(EVENTS.TRIPS_LOADED, function() {
     if (Router.getCurrent() === 'shareholder') render();
   });
 
