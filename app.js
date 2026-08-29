@@ -1085,6 +1085,7 @@ if (typeof module !== 'undefined' && module.exports) {
 // 預設（false）→ 封存團不計入（帳務頁/房間頁維持原行為）
 function calcAgentQuota(agentId, memberTxs, bookings, opts) {
   var includeSealed = !!(opts && opts.includeSealed);
+  var scopeTripId = (opts && opts.tripId) || null; // v1.6.6 帳務頁「團歸團」：指定只算該團
   function _effectiveAgentId(t) {
     if (t.agentId) return t.agentId;
     if (typeof Trips !== 'undefined' && t.tripId) {
@@ -1104,8 +1105,8 @@ function calcAgentQuota(agentId, memberTxs, bookings, opts) {
     if (trip.status === 'sealed') return includeSealed;
     return true;
   }
-  var agentTxs = (memberTxs || []).filter(function(t) { return _effectiveAgentId(t) === agentId && _isValid(t); });
-  var agentBookings = (bookings || []).filter(function(b) { return _effectiveAgentId(b) === agentId && _isValid(b); });
+  var agentTxs = (memberTxs || []).filter(function(t) { return _effectiveAgentId(t) === agentId && _isValid(t) && (!scopeTripId || t.tripId === scopeTripId); });
+  var agentBookings = (bookings || []).filter(function(b) { return _effectiveAgentId(b) === agentId && _isValid(b) && (!scopeTripId || b.tripId === scopeTripId); });
 
   var totalWash = agentTxs.reduce(function(s, t) { return s + (t.washCode || 0); }, 0);
   var totalThreshold = agentBookings.reduce(function(s, b) {
@@ -5649,10 +5650,9 @@ var MemberPage = (function() {
       var agent = Agents.getById(_selectedAgent);
       if (!agent) { html += '<div class="empty-state">代理不存在</div></div>'; return html; }
       var sh = Shareholders.getById(agent.shareholderId);
-      /* v1.6.3 達標計算含封存團（代理管理頁/PDF 口徑一致）：代理累積所有團總洗碼後結算達標；
-         「團歸團」——此處只顯示當前團的 mtxs/bookings，總洗碼/門檻是「該代理 × 當前團」口徑。
-         註：line 340 之 roomCount 仍取 quota（該代理所有 booking 合計），供代理管理視角參考 */
-      var quota = calcAgentQuota(_selectedAgent, allMtxs, allBookings, { includeSealed: true });
+      /* v1.6.6 團歸團：帳務頁「代理面板」只看當前選中團（_selectedTrip）的洗碼/訂房，
+         不混入代理名下其他團的合計；只有代理管理頁（agent.js）才看整個代理所有團累計 */
+      var quota = calcAgentQuota(_selectedAgent, allMtxs, allBookings, { tripId: _selectedTrip });
       var pct = quota.totalThreshold > 0 ? Math.min(100, (quota.totalWashRaw / quota.totalThreshold) * 100) : 0;
       var agentTxs = tripMtxs; // 已經篩選過了
 
@@ -6710,7 +6710,7 @@ var RoomPage = (function() {
     html += '<th>代理</th><th class="num">總洗碼(萬)</th><th class="num">總門檻</th><th>達標</th><th>配額</th>';
     html += '</tr></thead><tbody>';
     agentIds.forEach(function(aid) {
-      var quota = calcAgentQuota(aid, mtxs, tripBookings);
+      var quota = calcAgentQuota(aid, mtxs, tripBookings, { tripId: (mtxs[0] && mtxs[0].tripId) || null });
       var agent = Agents.getById(aid);
       var pct = quota.totalThreshold > 0 ? Math.min(100, (quota.totalWashRaw / quota.totalThreshold) * 100) : 0;
       html += '<tr>';
