@@ -847,6 +847,15 @@ var Perm = (function() {
       },
       special: {},
     },
+    staff: {
+      label: '員工',
+      pages: {
+        /* v1.7.10 員工角色（9/1 上線）：僅總覽/帳務/會員管理/房務/錢包，且可登錄編輯刪除 */
+        overview: 'read',
+        member: 'write', membersMgmt: 'write', room: 'write', wallet: 'write',
+      },
+      special: {},
+    },
     viewer: {
       label: '唯讀',
       pages: Object.assign(_allPages('read'), { auditLog: 'none' }),
