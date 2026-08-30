@@ -1,5 +1,11 @@
-/* variables.css — 所有顏色/字體/間距（只此一處定義） */
+/* variables.css — 設計系統單一真相來源（P0 對齊 APP app.css D1–D6）
+   所有顏色/字體/間距/圓角/陰影/層級/動效只此一處定義，全站只引用 token。
+   v1.7.0 P0：與 APP 100% 同步 + 補 --shadow-xs（member.css 引用缺口） */
+
 :root {
+  /* ============================================
+     D1 色彩系統
+     ============================================ */
   /* === 背景 === */
   --bg-primary: #f5f7fa;
   --bg-secondary: #ffffff;
@@ -11,10 +17,11 @@
   --text-muted: #adb5bd;
   --text-inverse: #ffffff;
 
-  /* === 主色 === */
+  /* === 主色（品牌藍）=== */
   --accent: #2b6cb0;
   --accent-light: #4299e1;
   --accent-dark: #2c5282;
+  --accent-bg: rgba(43, 108, 176, 0.1);
 
   /* === 語意色 === */
   --success: #38a169;
@@ -40,7 +47,7 @@
   --badge-danger-bg: #f8d7da;
   --badge-danger-text: #721c24;
 
-  /* === 登入畫面 === */
+  /* === 登入畫面（品牌深藍漸層）=== */
   --login-bg-1: #1a1a2e;
   --login-bg-2: #16213e;
   --login-bg-3: #0f3460;
@@ -52,35 +59,27 @@
   --login-text-muted: rgba(255,255,255,0.6);
   --login-placeholder: rgba(255,255,255,0.4);
 
-  /* === 字體 === */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft JhengHei', sans-serif;
-  --font-mono: 'SF Mono', 'Consolas', monospace;
-  --font-size-sm: 13px;
-  --font-size-base: 14px;
-  --font-size-lg: 16px;
-  --font-size-xl: 20px;
-  --font-size-2xl: 28px;
+  /* === 深色浮層（品牌深藍系，用於 iOS 引導/安裝提示等深色卡片）=== */
+  --overlay-backdrop: rgba(0, 0, 0, 0.7);
+  --sheet-bg: #232740;          /* 深藍卡片底 */
+  --sheet-bg-deep: #14162a;     /* 卡片內凹區塊 */
+  --sheet-border: #3a3f5c;
+  --sheet-text: #e8eaf2;
+  --sheet-text-muted: #9aa0b5;
+  --sheet-accent: #4299e1;      /* 品牌亮藍（同 --accent-light）*/
 
-  /* === 間距 === */
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 16px;
-  --spacing-lg: 24px;
-  --spacing-xl: 32px;
-
-  /* === 圓角 === */
-  --radius-sm: 4px;
-  --radius: 8px;
-  --radius-lg: 12px;
-
-  /* === 陰影 === */
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
-  --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
-
-  /* === 過渡 === */
-  --transition-fast: 0.15s ease;
-  --transition-normal: 0.25s ease;
+  /* === 半透明通用 === */
+  --white-alpha-85: rgba(255,255,255,0.85);
+  --white-alpha-60: rgba(255,255,255,0.6);
+  --white-alpha-40: rgba(255,255,255,0.4);
+  --white-alpha-20: rgba(255,255,255,0.2);
+  --white-alpha-10: rgba(255,255,255,0.1);
+  --white-alpha-08: rgba(255,255,255,0.08);
+  --black-alpha-50: rgba(0,0,0,0.5);
+  --black-alpha-10: rgba(0,0,0,0.1);
+  --black-alpha-08: rgba(0,0,0,0.08);
+  --black-alpha-015: rgba(0,0,0,0.015);
+  --table-stripe: rgba(0,0,0,0.015);
 
   /* === 貴賓廳色系 === */
   --hall-lyi: #2b6cb0;
@@ -95,6 +94,64 @@
   --hall-jm8: #805ad5;
   --hall-jm8-bg: #faf5ff;
   --hall-jm8-border: #e9d8fd;
+
+  /* ============================================
+     D2 字體階梯
+     ============================================ */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft JhengHei', sans-serif;
+  --font-mono: 'SF Mono', 'Consolas', monospace;
+  --font-size-2xs: 11px;   /* 極小輔助（導覽標籤、統計說明）*/
+  --font-size-xs: 12px;    /* 輔助文字、標籤、表格註記 */
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 28px;
+  --font-size-3xl: 32px;   /* 品牌 icon */
+  --font-size-4xl: 48px;   /* 登入 icon */
+
+  /* ============================================
+     D3 間距與圓角
+     ============================================ */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 999px;
+
+  /* ============================================
+     D5 陰影與層級
+     ============================================ */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.05);   /* WEB 專用：極輕陰影（member.css）*/
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
+  --shadow-inset: inset 0 1px 2px rgba(0,0,0,0.1);
+  --shadow-up: 0 -2px 12px rgba(0,0,0,0.06);  /* 底部導覽列上浮陰影 */
+
+  --z-modal: 1000;      /* Modal 遮罩 */
+  --z-login: 2000;      /* 登入全屏 */
+  --z-nav: 9000;        /* 手機底部導覽列 */
+  --z-banner: 9500;     /* 離線/同步狀態 banner（蓋過導覽）*/
+  --z-toast: 99980;     /* Toast 最上層回饋（蓋過導覽與設定精靈，僅次於安裝引導）*/
+  --z-setup: 99990;     /* 首次設定精靈 */
+  --z-a2hs: 100000;     /* iOS 安裝引導 */
+
+  /* ============================================
+     D6 動效規範
+     ============================================ */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-slow: 0.35s ease;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* base.css — reset + 基礎元素 */
@@ -253,7 +310,7 @@ a { color: var(--accent); text-decoration: none; }
 /* ===== 彈窗 ===== */
 #modal-overlay {
   display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;
+  background: var(--black-alpha-50); z-index: var(--z-modal); align-items: center; justify-content: center;
 }
 #modal-overlay.active { display: flex; }
 .modal-box {
@@ -268,7 +325,7 @@ a { color: var(--accent); text-decoration: none; }
 #login-overlay {
   display: flex; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: linear-gradient(135deg, var(--login-bg-1) 0%, var(--login-bg-2) 50%, var(--login-bg-3) 100%);
-  align-items: center; justify-content: center; z-index: 2000;
+  align-items: center; justify-content: center; z-index: var(--z-login);
 }
 .login-box {
   background: var(--login-glass); backdrop-filter: blur(20px); border: 1px solid var(--login-glass-border);
@@ -293,12 +350,12 @@ a { color: var(--accent); text-decoration: none; }
 #setup-overlay {
   display: flex; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: linear-gradient(135deg, var(--login-bg-1) 0%, var(--login-bg-2) 50%, var(--login-bg-3) 100%);
-  align-items: center; justify-content: center; z-index: 2000;
+  align-items: center; justify-content: center; z-index: var(--z-setup);
 }
 .login-box.shake { animation: shake 0.4s; }
 
 /* ===== Toast 通知 ===== */
-.toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; }
+.toast-container { position: fixed; bottom: 20px; right: 20px; z-index: var(--z-toast); }
 .toast { padding: 12px 20px; border-radius: var(--radius); margin-top: 8px; color: var(--bg-secondary); animation: slideIn 0.3s ease; }
 .toast-info { background: var(--info); }
 .toast-success { background: var(--success); }
