@@ -2335,11 +2335,12 @@ var Trips = (function() {
     _cascadeSealBookingsForTrip(id);
     return updated;
   }
-  /* v1.9.11 撤回待結帳：退回 active 恢復可編輯（交收完成封存前都可反悔） */
+  /* v1.9.11 撤回待結帳：退回 active 恢復可編輯（交收完成封存前都可反悔）
+     v1.6.8 與 APP 對齊：撤回時一併清除 lastSettlementDate，兩端數據一致 */
   function revertPending(id) {
     var t = getById(id);
     if (!t || t.status !== TRIP_STATUS.PENDING_SETTLEMENT) return null;
-    return update(id, { status: TRIP_STATUS.ACTIVE });
+    return update(id, { status: TRIP_STATUS.ACTIVE, lastSettlementDate: null });
   }
   function remove(id) {
     var arr = State.get('trips') || [];
