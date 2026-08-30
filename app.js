@@ -10517,9 +10517,14 @@ var WalletPage = (function() {
     html += '<button class="btn btn-primary" onclick="WalletPage.showAddWalletTx()">＋ 補登流水</button>';
     html += '</div>';
 
-    /* 餘額摘要 */
+    /* 餘額摘要：大字卡（與 APP 同款結構） */
+    html += '<div class="wallet-balance-card' + (balance < 0 ? ' neg' : '') + '">';
+    html += '<div class="wallet-balance-label">港幣現鈔餘額</div>';
+    html += '<div class="wallet-balance-num">HK$ ' + fmtHK(balance) + '</div>';
+    if (balance < 0) html += '<div class="wallet-balance-warn">⚠ 餘額為負，請立即對帳</div>';
+    html += '</div>';
+
     html += '<div class="kpi-grid" style="margin-bottom:16px;">';
-    html += '<div class="kpi-card highlight"><div class="kpi-label">錢包餘額(HK$)</div><div class="kpi-value">' + fmtHK(balance) + '</div></div>';
     html += '<div class="kpi-card normal"><div class="kpi-label">流入合計</div><div class="kpi-value" style="color:var(--success);">' + fmtHK(inflow) + '</div></div>';
     html += '<div class="kpi-card normal"><div class="kpi-label">流出合計</div><div class="kpi-value" style="color:var(--danger);">' + fmtHK(outflow) + '</div></div>';
     html += '<div class="kpi-card normal"><div class="kpi-label">流水筆數</div><div class="kpi-value">' + txs.length + '</div></div>';
