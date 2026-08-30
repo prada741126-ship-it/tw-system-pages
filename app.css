@@ -203,7 +203,14 @@ a { color: var(--accent); text-decoration: none; }
 .nav-item .nav-label { font-size: var(--font-size-base); }
 .main-content { flex: 1; padding: var(--spacing-lg); overflow-x: auto; }
 .page-section { display: none; }
-.page-section.active { display: block; }
+/* P3-1 頁面切換動畫：淡入 + 輕微上移，120ms 快速不拖沓（與 APP 同款） */
+.page-section.active { display: block; animation: page-enter var(--transition-fast, 120ms) var(--ease-out, ease-out); }
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* P3-3 圖示系統：SVG 共用（stroke 1.8 / 圓角端點 / 1em 隨字級縮放 / currentColor 隨文字色） */
+.ic { vertical-align: -0.15em; flex-shrink: 0; }
 .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--spacing-lg); }
 .topbar h2 { font-size: var(--font-size-xl); }
 .topbar-right { display: flex; align-items: center; gap: var(--spacing-md); }
@@ -492,12 +499,18 @@ select.form-input:disabled { background-image: none; }
   .card .data-table { min-width: 440px; }
 }
 
-/* ===== 列印 ===== */
+/* ===== 列印（P3-4 強化：隱藏互動元素/卡不拆頁/折疊全展開/保留底色） ===== */
 @media print {
-  .sidebar, .topbar, .btn, .btn-sm, .filter-bar, .paginator { display: none !important; }
+  .sidebar, .topbar, .filter-bar, .paginator, .toast, .modal, [class*="btn"] { display: none !important; }
   .main-content { padding: 0; }
-  .card { box-shadow: none; border: 1px solid var(--border-strong); }
-  body { background: var(--bg-secondary); color: var(--text-primary); }
+  body { background: var(--bg-secondary) !important; color: var(--text-primary); }
+  .card { box-shadow: none !important; border: 1px solid var(--border-strong); break-inside: avoid; }
+  .card-header, .ht-month-header, .pd-card-header { background: var(--bg-hover) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .data-table th { background: var(--bg-hover) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .data-table tr { break-inside: avoid; }
+  .kpi-value, .quota-fill, .badge, .ic { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .st-collapsible-body { max-height: none !important; height: auto !important; overflow: visible !important; opacity: 1 !important; padding-top: 0 !important; padding-bottom: 0 !important; }
+  a { color: var(--text-primary); text-decoration: none; }
 }
 
 /* 報表中心樣式統一放在 css/pages/reports.css */
