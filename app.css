@@ -1909,3 +1909,17 @@ select.form-input:disabled { background-image: none; }
   opacity: 0.95;
 }
 
+/* v1.7.9 批量勾選：checkbox 垂直置中、尺寸適中 */
+#page-wallet .data-table input[type="checkbox"],
+#page-wallet .data-table .wtx-check {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  vertical-align: middle;
+}
+#page-wallet .data-table td:first-child,
+#page-wallet .data-table th:first-child {
+  text-align: center;
+}
+
