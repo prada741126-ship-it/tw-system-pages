@@ -756,6 +756,64 @@ var Auth = (function() {
     return { ok: true };
   }
 
+  /* v1.7.11 管理員新增帳號：直接寫 users 記錄（含 pwdHash），與 APP createUserAccount 相容 */
+  async function createUserAccount(data) {
+    var email = String((data && data.email) || '').trim().toLowerCase();
+    var name = String((data && data.name) || '').trim();
+    var pwd = (data && data.pwd) || '';
+    if (!name) return { ok: false, error: '請輸入姓名' };
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'Email 格式不正確' };
+    if (String(pwd).length < 6) return { ok: false, error: '密碼至少需要 6 位' };
+    var cloudUsers = await _fetchCloudUsers();
+    var online = !!cloudUsers;
+    if (online) {
+      if (_findUserByEmail(cloudUsers, email)) return { ok: false, error: '此 Email 已被使用' };
+    } else if (_localUsers().some(function(u) {
+      return !u._deleted && String(u.email || '').toLowerCase() === email;
+    })) {
+      return { ok: false, error: '此 Email 已被使用' };
+    }
+    if (!FirebaseSync.isReady()) return { ok: false, error: '新增帳號需要網路連線，請確認網路後重試' };
+    var uid = _newUid();
+    var user = {
+      id: uid, email: email, name: name,
+      role: (data && data.role) || 'viewer',
+      permissions: (data && data.permissions) || {},
+      enabled: true,
+      pwdHash: await _credentialHash(email, pwd),
+      createdAt: Date.now(), _updatedAt: Date.now(),
+    };
+    await FirebaseSync.put(FB_PATH.USERS + '/' + uid, user);
+    var arr = _localUsers().filter(function(u) { return u.id !== uid; });
+    arr.push(user);
+    try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(arr)); } catch (e) {}
+    return { ok: true, uid: uid };
+  }
+
+  /* v1.7.11 管理員重設他人密碼：直接更新該帳號 pwdHash（與 APP resetPassword 相容） */
+  async function resetPassword(email, newPwd) {
+    email = String(email || '').trim().toLowerCase();
+    if (String(newPwd || '').length < 6) return { ok: false, error: '新密碼至少需要 6 位' };
+    var cloudUsers = await _fetchCloudUsers();
+    var user = null;
+    if (cloudUsers) {
+      user = _findUserByEmail(cloudUsers, email);
+    } else {
+      user = _localUsers().find(function(u) {
+        return !u._deleted && String(u.email || '').toLowerCase() === email;
+      }) || null;
+    }
+    if (!user) return { ok: false, error: '找不到此 Email 的帳號' };
+    var newHash = await _credentialHash(email, newPwd);
+    await FirebaseSync.put(FB_PATH.USERS + '/' + user.id + '/pwdHash', newHash);
+    await FirebaseSync.put(FB_PATH.USERS + '/' + user.id + '/_updatedAt', Date.now());
+    var arr = _localUsers();
+    var idx = arr.findIndex(function(u) { return u.id === user.id; });
+    if (idx >= 0) { arr[idx].pwdHash = newHash; arr[idx]._updatedAt = Date.now(); }
+    try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(arr)); } catch (e) {}
+    return { ok: true };
+  }
+
   function logout() {
     _session = null;
     _offline = false;
@@ -782,6 +840,8 @@ var Auth = (function() {
     needsSetup: needsSetup,
     setupFirstAdmin: setupFirstAdmin,
     changeMyPassword: changeMyPassword,
+    createUserAccount: createUserAccount,
+    resetPassword: resetPassword,
     logout: logout,
     getCurrent: getCurrent,
     isOffline: isOffline,
@@ -5916,7 +5976,10 @@ var MemberPage = (function() {
         html += '<button class="btn btn-warning" onclick="MemberPage.markPending(\'' + _selectedTrip + '\')">傳帳給上級 · 送入待結帳</button>';
       } else if (tripObj && tripObj.status === TRIP_STATUS.PENDING_SETTLEMENT) {
         html += '<span style="font-size:13px;color:var(--warning);white-space:nowrap;">此團已送入待結帳，帳務已鎖定。</span>';
-        html += '<button class="btn btn-secondary" onclick="MemberPage.revertPending(\'' + _selectedTrip + '\')">撤回待結帳 · 重新編輯</button>';
+        /* v1.7.11 員工僅送件權限：撤回待結帳限會計/管理員（具 pending write） */
+        if (typeof Perm === 'undefined' || !Perm.hasSession() || Perm.canWrite('pending')) {
+          html += '<button class="btn btn-secondary" onclick="MemberPage.revertPending(\'' + _selectedTrip + '\')">撤回待結帳 · 重新編輯</button>';
+        }
       }
     }
     html += '</div>';
@@ -6598,6 +6661,11 @@ var MemberPage = (function() {
   }
   /* v1.9.11 撤回待結帳：退回帳務頁恢復可編輯（計算錯誤時用；封存＝雙方確認才不可逆） */
   function revertPending(tripId) {
+    /* v1.7.11 員工僅送件權限：撤回待結帳需 pending 寫入權限（會計/管理員） */
+    if (typeof Perm !== 'undefined' && Perm.hasSession() && !Perm.canWrite('pending')) {
+      Toast.error('您的角色無權撤回待結帳，請聯絡會計或管理員');
+      return;
+    }
     Modal.confirm('將團 ' + tripId + ' 撤回帳務頁？\n撤回後帳務恢復可編輯，修正後需再次「傳帳給上級」。', function() {
       var ok = Trips.revertPending(tripId);
       Toast[ok ? 'success' : 'error'](ok ? '團 ' + tripId + ' 已撤回，可重新編輯帳務' : '撤回失敗（此團不在待結帳狀態）');
@@ -11666,6 +11734,11 @@ var SettingsPage = (function() {
     html += '<div class="form-group" style="align-self:flex-end;"><button class="btn btn-primary" onclick="SettingsPage.changePwd()">更新密碼</button></div>';
     html += '</div></div>';
 
+    // v1.7.11 帳號管理（管理員/超級管理員；與 APP 設定頁對齊）
+    if (typeof Perm !== 'undefined' && Perm.hasSession() && Perm.canManageUsers()) {
+      html += _renderAccountMgmtCard();
+    }
+
     // 員工管理
     html += '<div class="card">';
     html += '<div class="card-header"><h3>Bot 員工管理</h3></div>';
@@ -11713,6 +11786,33 @@ var SettingsPage = (function() {
     halls[idx][field] = val;
     Settings.updateVipHalls(halls);
     Toast.success('費率已更新');
+  }
+
+  /* ===== v1.7.11 員工自助改密碼（topbar 入口，所有人可用） ===== */
+  function changePwdModal() {
+    var html = '';
+    html += '<p style="margin:0 0 16px;color:var(--text-secondary);font-size:var(--font-size-sm);">驗證原密碼後即可更新；下次登入請使用新密碼。</p>';
+    html += '<div class="form-group"><label>原密碼</label><input type="password" id="cp-old-pwd" class="form-input" autocomplete="current-password"></div>';
+    html += '<div class="form-group"><label>新密碼（至少6位）</label><input type="password" id="cp-new-pwd" class="form-input" autocomplete="new-password"></div>';
+    html += '<div class="form-group"><label>確認新密碼</label><input type="password" id="cp-new-pwd2" class="form-input" autocomplete="new-password"></div>';
+    html += '<div class="form-group" style="align-self:flex-end;text-align:right;"><button class="btn btn-primary" onclick="SettingsPage.changePwdSubmit()">更新密碼</button></div>';
+    Modal.open('修改密碼', html);
+  }
+
+  async function changePwdSubmit() {
+    var oldPwd = document.getElementById('cp-old-pwd').value;
+    var pwd = document.getElementById('cp-new-pwd').value;
+    var pwd2 = document.getElementById('cp-new-pwd2').value;
+    if (!oldPwd) { Toast.error('請輸入原密碼'); return; }
+    if (!pwd || pwd.length < 6) { Toast.error('新密碼至少6位'); return; }
+    if (pwd !== pwd2) { Toast.error('兩次輸入的新密碼不一致'); return; }
+    var res = await Auth.changeMyPassword(oldPwd, pwd);
+    if (res.ok) {
+      Toast.success('密碼已更新，下次登入請使用新密碼');
+      Modal.close();
+    } else {
+      Toast.error(res.error);
+    }
   }
 
   function changePwd() {
@@ -11763,6 +11863,158 @@ var SettingsPage = (function() {
 
   function escHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /* ===== v1.7.11 帳號管理（與 APP 設定頁對齊，共用 taiwan_data/users） ===== */
+  function _userList() {
+    return Store.read(STORAGE_KEYS.USERS) || [];
+  }
+  function _isSuperAdmin() {
+    var u = Perm.sessionUser();
+    return !!u && u.role === 'super_admin';
+  }
+  /* 保護規則：非超管不可動 super_admin 帳號 */
+  function _protectedAccount(u) {
+    var me = Perm.sessionUser();
+    if (!me) return false;
+    if (u.role === 'super_admin' && me.role !== 'super_admin') return true;
+    return false;
+  }
+  function _renderAccountMgmtCard() {
+    var users = _userList();
+    var me = Perm.sessionUser() || {};
+    var roleOptions = Perm.roleIds().map(function(r) {
+      return '<option value="' + r + '">' + Perm.roleLabel(r) + '</option>';
+    }).join('');
+
+    var html = '<div class="card">';
+    html += '<div class="card-header"><h3>帳號管理</h3></div>';
+    html += '<p style="color:var(--text-secondary);font-size:var(--font-size-sm);margin:0 0 12px 0;">新增帳號、重設密碼、停用/啟用與角色調整；與 APP 設定頁共用同一份帳號資料。' +
+      (!_isSuperAdmin() ? '（super_admin 帳號僅超級管理員可管理）' : '') + '</p>';
+    html += '<table class="data-table"><thead><tr>';
+    html += '<th>姓名</th><th>Email</th><th>角色</th><th>狀態</th><th>操作</th>';
+    html += '</tr></thead><tbody>';
+    users.forEach(function(u) {
+      if (!u) return;
+      var protectedAcc = _protectedAccount(u);
+      var isSelf = u.id === me.uid;
+      var canEdit = !protectedAcc;
+      var roleSel = '<select class="form-input compact" onchange="SettingsPage.updateUserRole(\'' + escHtml(u.id) + '\',this.value)"' +
+        ((protectedAcc || isSelf) ? ' disabled' : '') + '>' +
+        roleOptions.replace('value="' + u.role + '"', 'value="' + u.role + '" selected') + '</select>';
+      var statusHtml = u.enabled === false
+        ? '<span class="text-danger">已停用</span>'
+        : '<span class="text-success">啟用</span>';
+      var actions = '';
+      actions += '<button class="btn-sm" onclick="SettingsPage.resetUserPassword(\'' + escHtml(u.email) + '\')">重設密碼</button> ';
+      if (canEdit) {
+        actions += '<button class="btn-sm" onclick="SettingsPage.toggleUserEnabled(\'' + escHtml(u.id) + '\')" ' + (isSelf ? 'disabled' : '') + '>' +
+          (u.enabled === false ? '啟用' : '停用') + '</button> ';
+      }
+      if (!isSelf && !protectedAcc) {
+        actions += '<button class="btn-sm btn-danger" onclick="SettingsPage.deleteUserAccount(\'' + escHtml(u.id) + '\')">刪除</button>';
+      }
+      html += '<tr>' +
+        '<td>' + escHtml(u.name || '') + (isSelf ? '（我）' : '') + '</td>' +
+        '<td><code>' + escHtml(u.email || '') + '</code></td>' +
+        '<td>' + roleSel + '</td>' +
+        '<td>' + statusHtml + '</td>' +
+        '<td>' + actions + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+
+    // 新增帳號
+    html += '<div style="margin-top:16px;padding:12px;background:var(--bg-tertiary);border-radius:var(--radius);">';
+    html += '<h4 style="margin:0 0 8px;">新增帳號</h4>';
+    html += '<div class="form-row" style="align-items:flex-end;">';
+    html += '<div class="form-group"><label>姓名</label><input type="text" id="acc-name" class="form-input" placeholder="顯示名稱"></div>';
+    html += '<div class="form-group"><label>Email（登入帳號）</label><input type="email" id="acc-email" class="form-input" placeholder="user@example.com"></div>';
+    html += '<div class="form-group"><label>初始密碼（至少6位）</label><input type="text" id="acc-pwd" class="form-input" placeholder="告知使用者的初始密碼"></div>';
+    html += '<div class="form-group"><label>角色</label><select id="acc-role" class="form-input">' + roleOptions + '</select></div>';
+    html += '<div class="form-group" style="align-self:flex-end;"><button class="btn btn-primary" onclick="SettingsPage.addUser()">新增</button></div>';
+    html += '</div></div></div>';
+    return html;
+  }
+
+  function updateUserRole(id, role) {
+    var u = _userList().find(function(x) { return x && x.id === id; });
+    if (!u) return;
+    if (_protectedAccount(u)) { Toast.error('此帳號僅超級管理員可管理'); render(); return; }
+    if (role === 'super_admin' && !_isSuperAdmin()) {
+      Toast.error('僅超級管理員可授予 super_admin 角色');
+      render(); return;
+    }
+    var arr = _userList();
+    var idx = arr.findIndex(function(x) { return x.id === id; });
+    if (idx >= 0) arr[idx].role = role;
+    Store.write(STORAGE_KEYS.USERS, arr);
+    FirebaseSync.put(FB_PATH.USERS + '/' + id + '/role', role);
+    Toast.success('角色已更新：' + (u.name || u.email));
+    render();
+  }
+
+  function toggleUserEnabled(id) {
+    var u = _userList().find(function(x) { return x && x.id === id; });
+    var me = Perm.sessionUser() || {};
+    if (!u) return;
+    if (_protectedAccount(u)) { Toast.error('此帳號僅超級管理員可管理'); return; }
+    if (u.id === me.uid) { Toast.error('不可停用自己的帳號'); return; }
+    var next = u.enabled === false;
+    var arr = _userList();
+    var idx = arr.findIndex(function(x) { return x.id === id; });
+    if (idx >= 0) arr[idx].enabled = next;
+    Store.write(STORAGE_KEYS.USERS, arr);
+    FirebaseSync.put(FB_PATH.USERS + '/' + id + '/enabled', next);
+    Toast.success((next ? '已啟用：' : '已停用：') + (u.name || u.email));
+    render();
+  }
+
+  async function resetUserPassword(email) {
+    var newPwd = prompt('設定「' + email + '」的新密碼（至少 6 位）');
+    if (newPwd === null) return;
+    var res = await Auth.resetPassword(email, newPwd);
+    if (res.ok) Toast.success('密碼已重設：' + email);
+    else Toast.error(res.error);
+  }
+
+  function deleteUserAccount(id) {
+    var u = _userList().find(function(x) { return x && x.id === id; });
+    var me = Perm.sessionUser() || {};
+    if (!u) return;
+    if (u.id === me.uid) { Toast.error('不可刪除自己的帳號'); return; }
+    if (_protectedAccount(u)) { Toast.error('此帳號僅超級管理員可管理'); return; }
+    Modal.confirm('確定刪除帳號「' + (u.name || u.email) + '」？\n（該帳號將無法再登入）', function() {
+      var arr = _userList();
+      var idx = arr.findIndex(function(x) { return x.id === id; });
+      if (idx >= 0) arr[idx]._deleted = true; /* 墓碑，與同步規則一致 */
+      Store.write(STORAGE_KEYS.USERS, arr);
+      FirebaseSync.put(FB_PATH.USERS + '/' + id + '/_deleted', true);
+      Toast.success('帳號已刪除');
+      render();
+    });
+  }
+
+  async function addUser() {
+    var name = document.getElementById('acc-name').value.trim();
+    var email = document.getElementById('acc-email').value.trim();
+    var pwd = document.getElementById('acc-pwd').value;
+    var role = document.getElementById('acc-role').value;
+    if (role === 'super_admin' && !_isSuperAdmin()) {
+      Toast.error('僅超級管理員可建立 super_admin 帳號');
+      return;
+    }
+    Toast.info('建立帳號中…');
+    var res = await Auth.createUserAccount({ name: name, email: email, pwd: pwd, role: role });
+    if (res.ok) {
+      Toast.success('帳號已建立：' + email);
+      document.getElementById('acc-name').value = '';
+      document.getElementById('acc-email').value = '';
+      document.getElementById('acc-pwd').value = '';
+      render();
+    } else {
+      Toast.error(res.error);
+    }
   }
 
   /* ===== 員工管理 ===== */
@@ -11916,7 +12168,7 @@ var SettingsPage = (function() {
     });
   }
 
-  return { render: render, saveRate: saveRate, updateHall: updateHall, toggleRebate: toggleRebate, toggleCard: toggleCard, updateTicket: updateTicket, changePwd: changePwd, addEmployee: addEmployee, delEmployee: delEmployee, resolveConflict: resolveConflict, clearConflicts: clearConflicts };
+  return { render: render, saveRate: saveRate, updateHall: updateHall, toggleRebate: toggleRebate, toggleCard: toggleCard, updateTicket: updateTicket, changePwd: changePwd, changePwdModal: changePwdModal, changePwdSubmit: changePwdSubmit, addUser: addUser, updateUserRole: updateUserRole, toggleUserEnabled: toggleUserEnabled, resetUserPassword: resetUserPassword, deleteUserAccount: deleteUserAccount, addEmployee: addEmployee, delEmployee: delEmployee, resolveConflict: resolveConflict, clearConflicts: clearConflicts };
 })();
 
 
