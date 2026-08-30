@@ -4227,14 +4227,27 @@ var AuditLog = (function() {
 /**
  * ui/toast.js — Toast 通知
  * 依赖: core/events.js
+ * v1.7.0 P1：加同款 SVG 圖示（與 APP 一致），文字維持 textContent 安全注入
  */
 var Toast = (function() {
+  var ICONS = {
+    info: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.5v4"/><path d="M8 4.8h.01"/></svg>',
+    success: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg>',
+    error: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+    warning: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3l6 10.5H2L8 3z"/><path d="M8 7v3"/><path d="M8 11.5h.01"/></svg>'
+  };
   function show(msg, type, duration) {
     var container = document.getElementById('toast-container');
     if (!container) return;
     var t = document.createElement('div');
     t.className = 'toast toast-' + (type || 'info');
-    t.textContent = msg;
+    var icon = document.createElement('span');
+    icon.className = 'toast-icon';
+    icon.innerHTML = ICONS[type] || ICONS.info;
+    t.appendChild(icon);
+    var text = document.createElement('span');
+    text.textContent = msg;
+    t.appendChild(text);
     container.appendChild(t);
     setTimeout(function() {
       t.classList.add('toast-fade-out');
@@ -4676,7 +4689,8 @@ var PdfExport = (function() {
     html += '<span>總門檻: ' + (quota.totalThreshold / 10000).toFixed(0) + ' 萬</span>';
     html += '<span class="' + (quota.isMet ? 'met' : 'unmet') + '">' + (quota.isMet ? '✅ 達標' : '⚠️ 未達標') + '</span>';
     html += '</div>';
-    html += '<div class="quota-bar"><div class="quota-fill" style="width:' + pct + '%;"></div></div>';
+    var qc = quota.isMet ? '#27ae60' : (pct < 50 ? '#3498db' : '#e67e22');
+    html += '<div class="quota-bar"><div class="quota-fill" style="width:' + pct + '%;background:' + qc + ';"></div></div>';
     html += '</div>';
 
     // 會員匯總表
@@ -5036,6 +5050,45 @@ var TripShare = (function() {
 
   return { openShareText: openShareText, buildShareText: buildShareText, _copyShareText: _copyShareText };
 })();
+
+
+// === src/ui/animate.js ===
+/**
+ * ui/animate.js — KPI 數字滾動動畫（v1.7.0 P1，與 APP 同款）
+ * 掃描容器內 .kpi-value 元素，解析其數值，從 0 滾動到目標值（600ms ease-out）。
+ * 用法：animateKpis(containerElement) —— 由 onPageChange 切頁時統一呼叫。
+ */
+function animateKpis(root) {
+  if (!root || !root.querySelectorAll) return;
+  var els = root.querySelectorAll('.kpi-value');
+  for (var i = 0; i < els.length; i++) {
+    (function(el) {
+      var txt = el.textContent || '';
+      var m = txt.match(/[\d,]+(\.\d+)?/);
+      if (!m) return; // 非數字（如「--」）略過
+      var target = parseFloat(m[0].replace(/,/g, ''));
+      if (isNaN(target)) return;
+      var prefix = txt.slice(0, txt.indexOf(m[0]));
+      var suffix = txt.slice(txt.indexOf(m[0]) + m[0].length);
+      var dec = (m[0].split('.')[1] || '').length;
+      var dur = 600, start = null;
+      function fmt(v) {
+        var s = v.toFixed(dec);
+        var parts = s.split('.');
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        return prefix + parts.join('.') + suffix;
+      }
+      function frame(ts) {
+        if (!start) start = ts;
+        var p = Math.min((ts - start) / dur, 1);
+        var eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = fmt(target * eased);
+        if (p < 1) requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    })(els[i]);
+  }
+}
 
 
 // === src/pages/overview.js ===
@@ -6054,7 +6107,7 @@ var MemberPage = (function() {
       html += '<span>總門檻: ' + (quota.totalThreshold / 10000).toFixed(0) + ' 萬</span>';
       html += '<span class="' + (quota.isMet ? 'text-success' : 'text-warning') + '">' + (quota.isMet ? '✅ 達標' : '⚠️ 未達標') + '</span>';
       html += '</div>';
-      html += '<div style="display:flex;align-items:center;"><div class="mb-ap-quota-bar" style="flex:1;"><div class="mb-ap-quota-fill" style="width:' + pct + '%;' + (quota.isMet ? '' : 'background:var(--warning);background:linear-gradient(90deg,var(--warning),var(--warning));') + '"></div></div><span class="mb-ap-quota-pct">' + pct.toFixed(1) + '%</span></div>';
+      html += '<div style="display:flex;align-items:center;"><div class="mb-ap-quota-bar" style="flex:1;"><div class="mb-ap-quota-fill" style="width:' + pct + '%;' + (quota.isMet ? '' : (pct < 50 ? 'background:var(--accent);' : 'background:var(--warning);')) + '"></div></div><span class="mb-ap-quota-pct">' + pct.toFixed(1) + '%</span></div>';
       html += '</div>';
 
       // 會員匯總表（同一會員多筆合併顯示總交收）
@@ -7101,7 +7154,7 @@ var RoomPage = (function() {
       html += '<td class="num">' + quota.totalWashCode.toFixed(0) + '</td>';
       html += '<td class="num">' + (quota.totalThreshold / 10000).toFixed(0) + '萬</td>';
       html += '<td>' + (quota.isMet ? '<span style="color:var(--success);font-weight:700;">✅ 達標</span>' : '<span style="color:var(--danger);font-weight:700;">未達標</span>') + '</td>';
-      var barColor = quota.isMet ? 'var(--success)' : 'var(--danger)';
+      var barColor = quota.isMet ? 'var(--success)' : (pct < 50 ? 'var(--accent)' : 'var(--warning)');
       html += '<td>';
       html += '<div style="display:flex;align-items:center;gap:10px;min-width:180px;">';
       html += '<div class="quota-bar" style="flex:1;"><div class="quota-fill" style="width:' + pct + '%;background:' + barColor + ';"></div></div>';
@@ -8638,7 +8691,7 @@ var AgentPage = (function() {
         html += '<span>總門檻: ' + (quota.totalThreshold / 10000).toFixed(0) + ' 萬</span>';
         html += '<span class="' + (quota.isMet ? 'text-success' : 'text-warning') + '">' + (quota.isMet ? '✅ 達標' : '⚠️ 未達標') + '</span>';
         html += '</div>';
-        html += '<div style="display:flex;align-items:center;"><div class="quota-bar" style="flex:1;"><div class="quota-fill" style="width:' + pct + '%;' + (quota.isMet ? '' : 'background:var(--warning);') + '"></div></div><span class="quota-pct">' + pct.toFixed(1) + '%</span></div>';
+        html += '<div style="display:flex;align-items:center;"><div class="quota-bar" style="flex:1;"><div class="quota-fill" style="width:' + pct + '%;' + (quota.isMet ? '' : (pct < 50 ? 'background:var(--accent);' : 'background:var(--warning);')) + '"></div></div><span class="quota-pct">' + pct.toFixed(1) + '%</span></div>';
         html += '</div>';
 
         // 统计
@@ -11848,6 +11901,11 @@ function onPageChange(pageName) {
       return;
     }
     try { renderMap[pageName](); } catch(e) { console.error('[App] render ' + pageName, e); }
+    /* v1.7.0 P1：KPI 數字滾動動畫（render 完成後觸發） */
+    setTimeout(function() {
+      var active = document.querySelector('.page-section.active');
+      if (active && typeof animateKpis === 'function') animateKpis(active);
+    }, 60);
   }
 }
 
