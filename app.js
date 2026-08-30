@@ -10421,6 +10421,7 @@ var HistoryPage = (function() {
 var WalletPage = (function() {
   var _tab = 'wallet';
   var _editingId = null;
+  var _sel = {}; /* 批量勾選：id -> true（render 重建 DOM 後依此還原勾選狀態） */
 
   function fmtHK(n) {
     var v = Math.round(n || 0);
@@ -10543,8 +10544,13 @@ var WalletPage = (function() {
 
     var html = '';
 
-    /* 補登按鈕 */
-    html += '<div style="margin-bottom:12px;text-align:right;">';
+    /* 工具列：左＝批量勾選操作列（勾選後才顯示），右＝補登按鈕 */
+    html += '<div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">';
+    html += '<div id="wtx-batch-bar" style="display:none;align-items:center;gap:8px;">';
+    html += '<span style="font-size:var(--font-size-sm);color:var(--text-muted);">已選 <b id="wtx-sel-count" style="color:var(--accent);">0</b> 筆</span>';
+    html += '<button class="btn btn-danger btn-sm" onclick="WalletPage.batchDeleteWalletTxs()">批量刪除</button>';
+    html += '<button class="btn btn-secondary btn-sm" onclick="WalletPage._clearSelection()">取消勾選</button>';
+    html += '</div>';
     html += '<button class="btn btn-primary" onclick="WalletPage.showAddWalletTx()">＋ 補登流水</button>';
     html += '</div>';
 
@@ -10566,7 +10572,9 @@ var WalletPage = (function() {
       return html;
     }
 
+    var allChecked = txs.length > 0 && txs.every(function(w) { return !!_sel[w.id]; });
     html += '<div class="table-wrapper"><table class="data-table"><thead><tr>';
+    html += '<th style="width:32px;"><input type="checkbox" id="wtx-check-all"' + (allChecked ? ' checked' : '') + ' onchange="WalletPage._toggleAll(this)"></th>';
     html += '<th>日期</th><th>類型</th><th class="num">金額(HK$)</th><th>會員</th><th>團</th><th>備註</th><th>操作</th>';
     html += '</tr></thead><tbody>';
 
@@ -10577,6 +10585,7 @@ var WalletPage = (function() {
         ? '<span style="color:var(--warning);" title="衍生流水，APP 對帳可能重建">' + ICONS.alert + ' ' + escHtml(typeName(w.type)) + '</span>'
         : escHtml(typeName(w.type));
       html += '<tr>';
+      html += '<td style="width:32px;"><input type="checkbox" class="wtx-check" value="' + escHtml(w.id) + '"' + (_sel[w.id] ? ' checked' : '') + ' onchange="WalletPage._onCheckChange()"></td>';
       html += '<td>' + escHtml(w.date || '') + '</td>';
       html += '<td>' + typeBadge + '</td>';
       html += '<td class="num" style="' + (amt >= 0 ? 'color:var(--success)' : 'color:var(--danger)') + ';">' + fmtHK(amt) + '</td>';
@@ -10822,6 +10831,61 @@ var WalletPage = (function() {
     Modal.confirm(msg, function() {
       WalletTxs.remove(id);
       Toast.success('已刪除');
+      render();
+    });
+  }
+
+  /* ===== 批量勾選刪除（v1.7.9 兩端對齊） ===== */
+  function _updateBatchBar() {
+    var n = 0;
+    for (var k in _sel) if (_sel[k]) n++;
+    var bar = document.getElementById('wtx-batch-bar');
+    var cnt = document.getElementById('wtx-sel-count');
+    if (bar) bar.style.display = n > 0 ? 'flex' : 'none';
+    if (cnt) cnt.textContent = n;
+  }
+
+  function _toggleAll(cb) {
+    _sel = {};
+    document.querySelectorAll('.wtx-check').forEach(function(c) {
+      c.checked = !!cb.checked;
+      if (c.checked) _sel[c.value] = true;
+    });
+    _updateBatchBar();
+  }
+
+  function _onCheckChange() {
+    document.querySelectorAll('.wtx-check').forEach(function(c) {
+      if (c.checked) _sel[c.value] = true; else delete _sel[c.value];
+    });
+    var checks = document.querySelectorAll('.wtx-check');
+    var allCk = document.getElementById('wtx-check-all');
+    if (allCk) allCk.checked = checks.length > 0 && checks.length === Object.keys(_sel).length;
+    _updateBatchBar();
+  }
+
+  function _clearSelection() {
+    _sel = {};
+    document.querySelectorAll('.wtx-check').forEach(function(c) { c.checked = false; });
+    var allCk = document.getElementById('wtx-check-all');
+    if (allCk) allCk.checked = false;
+    _updateBatchBar();
+  }
+
+  function batchDeleteWalletTxs() {
+    var ids = Object.keys(_sel).filter(function(k) { return _sel[k]; });
+    if (ids.length === 0) { Toast.warning('請先勾選要刪除的流水'); return; }
+    var txs = (State.get('walletTxs') || []).filter(function(w) { return ids.indexOf(w.id) >= 0; });
+    var derivedCount = txs.filter(function(w) { return WalletTxs.isDerived(w); }).length;
+    var totalHK = txs.reduce(function(s, w) { return s + (w.amountHKD || 0); }, 0);
+    var msg = '確定刪除勾選的 ' + ids.length + ' 筆流水（合計 HK$ ' + fmtHK(totalHK) + '）？';
+    if (derivedCount > 0) {
+      msg += '\n\n⚠ 其中 ' + derivedCount + ' 筆為衍生流水（由帳務/借支/預支自動產生），APP 端對帳時可能重建。若要真正移除請刪除來源記錄。';
+    }
+    Modal.confirm(msg, function() {
+      ids.forEach(function(id) { WalletTxs.remove(id); });
+      _sel = {};
+      Toast.success('已刪除 ' + ids.length + ' 筆流水');
       render();
     });
   }
@@ -11182,6 +11246,10 @@ var WalletPage = (function() {
     showEditWalletTx: showEditWalletTx,
     saveWalletTx: saveWalletTx,
     deleteWalletTx: deleteWalletTx,
+    _toggleAll: _toggleAll,
+    _onCheckChange: _onCheckChange,
+    _clearSelection: _clearSelection,
+    batchDeleteWalletTxs: batchDeleteWalletTxs,
     showAddLoan: showAddLoan,
     showEditLoan: showEditLoan,
     repayLoan: repayLoan,
