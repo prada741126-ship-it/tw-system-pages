@@ -30,6 +30,7 @@ var CONFIG = {
   SYNC_RETRY_MAX:     3,
   SYNC_RETRY_BASE:    500,
   UPLOAD_BATCH_MAX:   200,
+  CONFLICT_RETENTION_DAYS: 30, /* v1.6.9 同步衝突本機保留天數（與 APP 一致） */
   PRODUCTION:         true,
 };
 
@@ -62,6 +63,7 @@ var STORAGE_KEYS = {
   LAST_SYNC_TIME:    'tw1_last_sync_time',
   RECENTLY_DELETED:  'tw1_recently_deleted',
   APP_VERSION:       'tw1_app_version',
+  SYNC_CONFLICTS:    'tw1_sync_conflicts', /* v1.6.9 同步衝突本機記錄（與 APP 一致，純本機不上雲） */
 };
 
 // ============================================================================
@@ -169,6 +171,8 @@ var EVENTS = {
   SYNC_START:        'sync:start',
   SYNC_COMPLETE:     'sync:complete',
   SYNC_ERROR:        'sync:error',
+  SYNC_CONFLICT:     'sync:conflict',     /* v1.6.9 同步衝突偵測（與 APP 一致） */
+  CONFLICTS_CHANGED: 'conflicts:changed', /* v1.6.9 衝突清單異動 */
   CONNECTION_CHANGED: 'connection:changed',
   PAGE_CHANGED:      'page:changed',
   TOAST:             'ui:toast',
@@ -1116,7 +1120,9 @@ function calcAgentQuota(agentId, memberTxs, bookings, opts) {
 
   // 洗码以万为单位，门檻以原始数字为单位 → 统一为原始数字
   var totalWashRaw = totalWash * 10000;
-  var isMet = totalWashRaw >= totalThreshold;
+  // v1.6.9 與 APP 對齊：有訂房才論達標（hasBookings）——團完全沒訂房時即使洗碼夠也不顯示達標
+  var hasBookings = agentBookings.length > 0;
+  var isMet = hasBookings && totalWashRaw >= totalThreshold;
 
   return {
     agentId: agentId,
@@ -1124,6 +1130,7 @@ function calcAgentQuota(agentId, memberTxs, bookings, opts) {
     totalWashRaw: totalWashRaw,
     totalThreshold: totalThreshold,
     isMet: isMet,
+    hasBookings: hasBookings,
     roomCount: agentBookings.reduce(function(s, b) { return s + (b.nights || 1); }, 0),
     rooms: agentBookings,
   };
@@ -1448,13 +1455,81 @@ if (typeof module !== 'undefined' && module.exports) {
 /**
  * sync/merger.js — 墓碑永远赢的合并器
  * 依赖: 无
- * 规则: 墓碑(_deleted=true)永远赢 > 封存(sealed)保护 > 时间戳决胜 > 取联集
+ * 规则: 墓碑(_deleted=true)永远赢 > 显式复活(_reviveAt 新于墓碑) > 封存(sealed)保护 > 时间戳决胜 > 取联集
  *
  * 封存保护（v1.6.7）：collection === 'trips' 时，若一端 status=sealed 而另一端不是，
  * sealed 一方永远赢（不管时间戳）。封存是不可逆动作，任何一端的旧状态
  * 都不得把另一端已封存的团「复原」回 active/pending。
  * 这是「WEB 封存 → APP 不同步 / APP 旧数据盖回云封存」连锁故障的源头防御。
+ *
+ * 衝突可視化（v1.6.9，與 APP 對齊）：
+ *  - mergeArrayWithConflicts() 額外回傳 conflicts 清單（雙方都活著且資料不同的「真衝突」）
+ *  - 既有 mergeArray() 行為不變（backup 匯入等非同步路徑沿用，不產生衝突記錄）
+ *  - _reviveAt 復活規則：活記錄帶 _reviveAt 且新於墓碑 _updatedAt → 活記錄贏（跨裝置還原）
+ *  - 三方比對基準（v2.3.1 APP 同款）：每次合併後記下「同步基準」（內容簽名），
+ *    只有「本地內容 ≠ 基準（本地也改過）」且「雲端內容 ≠ 本地（雲端也改過）」才算真衝突，
+ *    避免「WEB 單方面編輯 → 本端只是還沒收到更新的舊版」被誤報為衝突。
  */
+
+// 比較兩個活記錄是否「資料不同」（忽略 _updatedAt / _reviveAt / _run 自身欄位）
+// 顺序无关的稳定序列化（Firebase 回传的物件键序与本机不同，JSON.stringify 直接比对会造成假性衝突）
+function _stableStringify(v) {
+  if (v === undefined) return 'null';
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) === undefined ? 'null' : JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(function(x) { return _stableStringify(x); }).join(',') + ']';
+  return '{' + Object.keys(v).sort().map(function(k) {
+    return JSON.stringify(k) + ':' + _stableStringify(v[k]);
+  }).join(',') + '}';
+}
+
+function _dataDiffers(a, b) {
+  if (!a || !b) return true;
+  var keys = {};
+  Object.keys(a).forEach(function(k) { keys[k] = true; });
+  Object.keys(b).forEach(function(k) { keys[k] = true; });
+  for (var k in keys) {
+    if (k === '_updatedAt' || k === '_reviveAt' || k === '_run') continue;
+    if (_stableStringify(a[k]) !== _stableStringify(b[k])) return true;
+  }
+  return false;
+}
+
+/* v1.6.9 三方比對同步基準（與 APP v2.3.1 同款）：
+ * 舊邏輯只看「本地 vs 雲端」內容不同就記衝突——但另一端編輯後本地只是還沒收到更新的舊版，
+ * 這是正常同步而非衝突，導致誤報衝突。
+ * 新邏輯：每次合併完成後記下「同步基準」（內容簽名）；下次合併時，
+ * 只有「本地內容 ≠ 基準（本地這邊也改過）」且「雲端內容 ≠ 本地（雲端也改過）」才算真衝突。
+ * 基準為本機記憶體（重啟後重置）——重啟後本地即上次合併結果，視為未修改，不誤報。 */
+var _syncBaseline = {}; // { collection: { fbKey: contentSignature } }
+
+function _contentSig(item) {
+  if (!item) return '';
+  var copy = {};
+  Object.keys(item).forEach(function(k) {
+    if (k === '_updatedAt' || k === '_reviveAt' || k === '_run') return;
+    copy[k] = item[k];
+  });
+  return _stableStringify(copy);
+}
+
+/** 合併結果持久化後呼叫：更新該集合的同步基準（watcher / _resyncAll / syncUploadAll 皆須呼叫） */
+function updateSyncBaseline(collection, arr) {
+  var c = collection || '_';
+  var base = {};
+  (arr || []).forEach(function(item) {
+    if (item && item._fbKey) base[item._fbKey] = _contentSig(item);
+  });
+  _syncBaseline[c] = base;
+}
+
+/** 本地此筆是否在上次同步後被修改過（無基準＝視為未修改，避免誤報） */
+function _localModifiedSinceSync(collection, fbKey, lItem) {
+  var base = _syncBaseline[collection || '_'];
+  if (!base) return false;
+  var sig = base[fbKey];
+  if (sig === undefined) return false;
+  return sig !== _contentSig(lItem);
+}
 
 function mergeArray(local, remote, collection) {
   var localArr = local || [];
@@ -1477,8 +1552,11 @@ function mergeArray(local, remote, collection) {
       // 墓碑永远赢，不管时间戳
       map[rItem._fbKey] = rItem;
     } else if (lItem._deleted) {
-      // 本地已是墓碑，保持墓碑
-      // map[rItem._fbKey] 已是 lItem (墓碑)
+      // 本地已是墓碑；除非远程显式复活（_reviveAt 新于墓碑），否则保持墓碑
+      if (rItem._reviveAt && rItem._reviveAt > (lItem._updatedAt || 0)) {
+        map[rItem._fbKey] = rItem; // 显式复活赢过旧墓碑
+      }
+      // 否则 map[rItem._fbKey] 已是 lItem (墓碑)
     } else {
       // 两者都活着
       if (isTrips) {
@@ -1501,6 +1579,78 @@ function mergeArray(local, remote, collection) {
   return result;
 }
 
+/**
+ * v1.6.9 带冲突追踪的合并（與 APP mergeArrayWithConflicts 同款）
+ * 回传 { merged, conflicts }
+ *  conflicts: [{ fbKey, collection, local, remote, winner: 'local'|'remote', at }]
+ *  真衝突定義：兩者都活著、且資料內容不同（忽略時間戳自身）、且本地自上次同步基準後被改過
+ *  合併結果與 mergeArray 一致（時間戳贏家勝出），衝突清單供操作者事後審視
+ */
+function mergeArrayWithConflicts(local, remote, collection) {
+  var localArr = local || [];
+  var remoteArr = remote || [];
+  var map = {};
+  var conflicts = [];
+  var result = [];
+  var isTrips = collection === 'trips';
+
+  localArr.forEach(function(item) {
+    if (item && item._fbKey) map[item._fbKey] = item;
+  });
+
+  remoteArr.forEach(function(rItem) {
+    if (!rItem || !rItem._fbKey) return;
+    var lItem = map[rItem._fbKey];
+    if (!lItem) {
+      map[rItem._fbKey] = rItem;
+      return;
+    }
+    if (rItem._deleted) {
+      map[rItem._fbKey] = rItem; // 墓碑赢
+      return;
+    }
+    if (lItem._deleted) {
+      if (rItem._reviveAt && rItem._reviveAt > (lItem._updatedAt || 0)) {
+        map[rItem._fbKey] = rItem;
+      }
+      return;
+    }
+    // 两者都活着
+    var lTs = lItem._updatedAt || 0;
+    var rTs = rItem._updatedAt || 0;
+    var winner;
+    if (isTrips) {
+      var lSealed = lItem.status === 'sealed';
+      var rSealed = rItem.status === 'sealed';
+      if (lSealed !== rSealed) {
+        // 封存保護：sealed 一方永远赢（封存不可逆）
+        winner = lSealed ? 'local' : 'remote';
+        map[rItem._fbKey] = lSealed ? lItem : rItem;
+      } else {
+        winner = rTs >= lTs ? 'remote' : 'local';
+        map[rItem._fbKey] = winner === 'remote' ? rItem : lItem;
+      }
+    } else {
+      winner = rTs >= lTs ? 'remote' : 'local';
+      map[rItem._fbKey] = winner === 'remote' ? rItem : lItem;
+    }
+    // 真衝突（三方比對）：雲端內容 ≠ 本地，且本地自上次同步基準後也被改過
+    if (_dataDiffers(lItem, rItem) && _localModifiedSinceSync(collection, rItem._fbKey, lItem)) {
+      conflicts.push({
+        fbKey: rItem._fbKey,
+        collection: collection || '',
+        local: lItem,
+        remote: rItem,
+        winner: winner,
+        at: Date.now(),
+      });
+    }
+  });
+
+  Object.keys(map).forEach(function(key) { result.push(map[key]); });
+  return { merged: result, conflicts: conflicts };
+}
+
 function mergeObject(local, remote) {
   if (!remote) return local;
   if (!local) return remote;
@@ -1510,8 +1660,197 @@ function mergeObject(local, remote) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { mergeArray: mergeArray, mergeObject: mergeObject };
+  module.exports = {
+    mergeArray: mergeArray,
+    mergeArrayWithConflicts: mergeArrayWithConflicts,
+    mergeObject: mergeObject,
+    updateSyncBaseline: updateSyncBaseline,
+    _dataDiffers: _dataDiffers,
+    _stableStringify: _stableStringify,
+  };
 }
+
+
+// === src/sync/conflicts.js ===
+/**
+ * sync/conflicts.js — v1.6.9 同步衝突可視化（與 APP Conflicts 同款）
+ * 職責：記錄 mergeArrayWithConflicts 偵測到的「真衝突」（雙方都改且資料不同），
+ *   讓操作者事後審視，而非靜默以時間戳覆蓋。
+ *
+ * 資料流：watchers/uploader 合併遠端 → 偵測衝突 → record() → 寫入本機佇列 +
+ *   emit EVENTS.SYNC_CONFLICT → app.js 接 Toast 提示 → 設定頁「同步衝突」卡片列出
+ *   → 操作者 resolve(id, 'local'|'remote') → 套用所選版本（新 _updatedAt）→
+ *   下一輪同步以操作者選擇為準 → 衝突解決。
+ *
+ * 設計：
+ *  - 衝突僅存本機（STORAGE_KEYS.SYNC_CONFLICTS），不上雲（純客端可視化）
+ *  - resolve 套用版本時用新 _updatedAt + 既有 enqueue 上傳 → 跨裝置一致
+ *  - 過期自動清理（CONFIG.CONFLICT_RETENTION_DAYS，預設 30 天）
+ *
+ * 依赖: core/constants.js, core/events.js, core/state.js, core/store.js, sync/uploader.js, sync/merger.js
+ */
+var Conflicts = (function() {
+  'use strict';
+
+  // 集合 → 寫回所需 meta（storeKey / fbPath / 廣播事件 / stateKey）
+  var COLLECTION_META = {
+    members:       { storeKey: STORAGE_KEYS.MEMBERS,      fbPath: FB_PATH.MEMBERS,      event: EVENTS.MEMBERS_LOADED,      stateKey: 'members' },
+    agents:        { storeKey: STORAGE_KEYS.AGENTS,        fbPath: FB_PATH.AGENTS,       event: EVENTS.AGENTS_LOADED,        stateKey: 'agents' },
+    shareholders:  { storeKey: STORAGE_KEYS.SHAREHOLDERS,  fbPath: FB_PATH.SHAREHOLDERS, event: EVENTS.SHAREHOLDERS_LOADED, stateKey: 'shareholders' },
+    trips:         { storeKey: STORAGE_KEYS.TRIPS,        fbPath: FB_PATH.TRIPS,        event: EVENTS.TRIPS_LOADED,         stateKey: 'trips' },
+    memberTxs:     { storeKey: STORAGE_KEYS.MEMBER_TXS,   fbPath: FB_PATH.MEMBER_TXS,   event: EVENTS.MTX_LOADED,           stateKey: 'memberTxs' },
+    bookings:      { storeKey: STORAGE_KEYS.BOOKINGS,     fbPath: FB_PATH.BOOKINGS,     event: EVENTS.BOOKINGS_LOADED,      stateKey: 'bookings' },
+    supplements:   { storeKey: STORAGE_KEYS.SUPPLEMENTS,   fbPath: FB_PATH.SUPPLEMENTS,  event: EVENTS.SYNC_COMPLETE,        stateKey: 'supplements' },
+    settings:      { storeKey: STORAGE_KEYS.SETTINGS,     fbPath: FB_PATH.SETTINGS,     event: EVENTS.SETTINGS_LOADED,      stateKey: 'settings' },
+    extraIncome:   { storeKey: STORAGE_KEYS.EXTRA_INCOME, fbPath: FB_PATH.EXTRA_INCOME, event: EVENTS.SYNC_COMPLETE,        stateKey: 'extraIncome' },
+    hotelConfig:   { storeKey: STORAGE_KEYS.HOTEL_CONFIG, fbPath: FB_PATH.HOTEL_CONFIG, event: EVENTS.HOTEL_CONFIG_LOADED,  stateKey: 'hotelConfig' },
+    walletTxs:     { storeKey: STORAGE_KEYS.WALLET_TXS,   fbPath: FB_PATH.WALLET_TXS,   event: EVENTS.WALLET_TXS_LOADED,    stateKey: 'walletTxs' },
+    loans:         { storeKey: STORAGE_KEYS.LOANS,        fbPath: FB_PATH.LOANS,        event: EVENTS.LOANS_LOADED,         stateKey: 'loans' },
+    pendingExps:   { storeKey: STORAGE_KEYS.PENDING_EXPS, fbPath: FB_PATH.PENDING_EXPS, event: EVENTS.PENDING_EXPS_LOADED,  stateKey: 'pendingExps' },
+    catalog:       { storeKey: STORAGE_KEYS.CATALOG,      fbPath: FB_PATH.CATALOG,      event: EVENTS.CATALOG_LOADED,       stateKey: 'catalog' },
+    auditLog:      { storeKey: STORAGE_KEYS.AUDIT_LOG,    fbPath: FB_PATH.AUDIT_LOG,    event: EVENTS.AUDIT_LOG_LOADED,     stateKey: 'auditLog' },
+  };
+
+  function _load() {
+    return Store.readArray(STORAGE_KEYS.SYNC_CONFLICTS);
+  }
+
+  function _save(arr) {
+    Store.writeArray(STORAGE_KEYS.SYNC_CONFLICTS, arr || []);
+  }
+
+  function _emit() {
+    EventBus.emit(EVENTS.CONFLICTS_CHANGED, _load());
+  }
+
+  /**
+   * 記錄一組衝突（由 watchers/uploader 呼叫）。已存在同 fbKey 的舊衝突會被覆蓋（保留最新）。
+   */
+  function record(collection, conflicts) {
+    if (!conflicts || !conflicts.length) return;
+    // 假性衝突防線：本机与云端资料实质相同（仅键序/时间戳不同）者不记录
+    conflicts = conflicts.filter(function(c) {
+      return c && c.local && c.remote && _dataDiffers(c.local, c.remote);
+    });
+    if (!conflicts.length) return;
+    var arr = _load();
+    conflicts.forEach(function(c) {
+      // 移除同 collection + fbKey 的舊衝突（避免堆疊）
+      arr = arr.filter(function(x) {
+        return !(x.collection === collection && x.fbKey === c.fbKey);
+      });
+      var id = 'C' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+      arr.push({
+        id: id,
+        collection: collection,
+        fbKey: c.fbKey,
+        local: c.local,
+        remote: c.remote,
+        winner: c.winner,
+        at: c.at || Date.now(),
+      });
+    });
+    // 上限 200 筆，超出丟最舊
+    if (arr.length > 200) arr = arr.slice(-200);
+    _save(arr);
+    _emit();
+    EventBus.emit(EVENTS.SYNC_CONFLICT, { count: conflicts.length, collection: collection });
+  }
+
+  function getAll() {
+    return _load();
+  }
+
+  function count() {
+    return _load().length;
+  }
+
+  /**
+   * 解決衝突：操作者選擇 local 或 remote 版本
+   *  - choice === 'local'  → 套用本機版本（新 _updatedAt + _reviveAt）→ 上傳 → 下輪同步本機贏
+   *  - choice === 'remote' → 直接採用遠端版本（已在 merged 中）→ 僅移除衝突記錄
+   *  - choice === winner   → 同採用勝方，僅移除衝突記錄（不改資料）
+   */
+  function resolve(conflictId, choice) {
+    var arr = _load();
+    var idx = arr.findIndex(function(c) { return c.id === conflictId; });
+    if (idx < 0) return false;
+    var c = arr[idx];
+
+    // 選擇非勝方 → 套用敗方版本（給新時間戳，下輪同步此版本贏）
+    if ((choice === 'local' && c.winner === 'remote') ||
+        (choice === 'remote' && c.winner === 'local')) {
+      var meta = COLLECTION_META[c.collection];
+      if (meta) {
+        var chosen = choice === 'local' ? c.local : c.remote;
+        if (chosen && chosen._fbKey) {
+          var list = Store.readArray(meta.storeKey);
+          var i = list.findIndex(function(x) { return x._fbKey === chosen._fbKey; });
+          var now = Date.now();
+          var revived = Object.assign({}, chosen, {
+            _deleted: false,
+            _updatedAt: now,
+            _reviveAt: now,
+          });
+          if (i >= 0) list[i] = revived; else list.push(revived);
+          Store.writeArray(meta.storeKey, list);
+          if (typeof State !== 'undefined') State.set(meta.stateKey, list);
+          if (typeof enqueue === 'function') {
+            var obj = {}; obj[revived._fbKey] = revived;
+            enqueue(meta.fbPath, obj);
+          }
+          if (typeof EventBus !== 'undefined') EventBus.emit(meta.event, list);
+        }
+      }
+    }
+    // 移除衝突記錄
+    arr.splice(idx, 1);
+    _save(arr);
+    _emit();
+    return true;
+  }
+
+  /** 清除所有衝突（管理員一鍵忽略） */
+  function clearAll() {
+    _save([]);
+    _emit();
+  }
+
+  /** 過期自動清理（CONFIG.CONFLICT_RETENTION_DAYS） */
+  function prune() {
+    var cutoff = Date.now() - CONFIG.CONFLICT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    var arr = _load();
+    var kept = arr.filter(function(c) { return c.at >= cutoff; });
+    if (kept.length < arr.length) {
+      _save(kept);
+      console.log('[Conflicts] Pruned ' + (arr.length - kept.length) + ' conflicts older than ' + CONFIG.CONFLICT_RETENTION_DAYS + ' days');
+    }
+  }
+
+  /** 清除历史假性衝突（本机与云端资料实质相同者） */
+  function pruneFalsePositives() {
+    var arr = _load();
+    var kept = arr.filter(function(c) {
+      return _dataDiffers(c.local, c.remote);
+    });
+    if (kept.length < arr.length) {
+      _save(kept);
+      console.log('[Conflicts] Removed ' + (arr.length - kept.length) + ' false-positive conflicts');
+      _emit();
+    }
+  }
+
+  return {
+    record: record,
+    getAll: getAll,
+    count: count,
+    resolve: resolve,
+    clearAll: clearAll,
+    prune: prune,
+    pruneFalsePositives: pruneFalsePositives,
+    COLLECTION_META: COLLECTION_META,
+  };
+})();
 
 
 // === src/sync/recentlyDeleted.js ===
@@ -1717,9 +2056,9 @@ var _UPLOAD_META = {
 // 導致任一端的本地舊資料把另一端的新修改 / 刪除墓碑覆蓋回去（刪除復活、修改被蓋回）。
 // 新版改為「先拉後合併差異上傳」：
 //   1) 先 fbOnce 拉取雲端
-//   2) mergeArray 合併（墓碑永遠贏 > 時間戳決勝 > 聯集）
+//   2) mergeArrayWithConflicts 合併（墓碑永遠贏 > 復活 > 封存保護 > 時間戳決勝 > 聯集），真衝突交 Conflicts 記錄
 //   3) 只上傳「本地確實比雲端新」的差異項（含本地墓碑；雲端墓碑絕不覆蓋）
-//   4) 合併結果寫回本地，確保與雲端對齊
+//   4) 合併結果寫回本地 + 更新同步基準，確保與雲端對齊
 function syncUploadAll(dataMap) {
   return Promise.all(Object.keys(dataMap).map(function(key) {
     var path = FB_PATH[key];
@@ -1731,8 +2070,12 @@ function syncUploadAll(dataMap) {
         var remoteObj = remoteVal || {};
         var remoteArr = Object.keys(remoteObj).map(function(k) { return remoteObj[k]; });
 
-        // 1) 合併：墓碑永遠贏 > 封存保護 > 時間戳決勝 > 聯集
-        var merged = mergeArray(data, remoteArr, key === 'TRIPS' ? 'trips' : undefined);
+        // 1) 合併（帶衝突偵測）
+        var mergeRes = mergeArrayWithConflicts(data, remoteArr, (_UPLOAD_META[key] || {}).stateKey || key);
+        var merged = mergeRes.merged;
+        if (mergeRes.conflicts.length > 0 && typeof Conflicts !== 'undefined') {
+          Conflicts.record((_UPLOAD_META[key] || {}).stateKey || key, mergeRes.conflicts);
+        }
 
         // MEMBER_TXS：合併後重新計算衍生欄位（與 watchers 一致）
         if (key === 'MEMBER_TXS' && typeof calcMemberTx === 'function') {
@@ -1773,6 +2116,7 @@ function syncUploadAll(dataMap) {
           if (storeKey) Store.writeArray(storeKey, merged);
           State.set(meta.stateKey, merged);
           if (EVENTS[meta.event]) EventBus.emit(EVENTS[meta.event], merged);
+          updateSyncBaseline(meta.stateKey, merged); // v1.6.9 三方比對基準（須在 recalc 之後）
         }
 
         if (Object.keys(toUpload).length > 0) {
@@ -1864,7 +2208,12 @@ function _setupWatchers() {
       try {
         var local = Store.readArray(w.storeKey);
         var remote = remoteVal ? Object.values(remoteVal) : [];
-        var merged = mergeArray(local, remote, w.stateKey);
+        // v1.6.9 衝突可視化：用帶衝突偵測的合併，衝突交由 Conflicts 記錄供操作者審視
+        var mergeRes = mergeArrayWithConflicts(local, remote, w.stateKey);
+        var merged = mergeRes.merged;
+        if (mergeRes.conflicts.length > 0 && typeof Conflicts !== 'undefined') {
+          Conflicts.record(w.stateKey, mergeRes.conflicts);
+        }
 
         /* MEMBER_TXS: Bot 只寫入 outCode/backCode/washCode��需重新計算衍生欄位 */
         if (w.key === 'MEMBER_TXS' && typeof calcMemberTx === 'function') {
@@ -1923,6 +2272,7 @@ function _setupWatchers() {
         Store.writeArray(w.storeKey, merged);
         State.set(w.stateKey, merged);
         EventBus.emit(w.event, merged);
+        updateSyncBaseline(w.stateKey, merged); // v1.6.9 三方比對基準（須在 recalc 之後）
       } catch(e) {
         console.error('[Watchers] ' + w.key, e);
       }
@@ -2004,7 +2354,11 @@ function _resyncAll() {
       var local = Store.readArray(cfg.storeKey);
       var remote = remoteVal ? Object.values(remoteVal) : [];
       if (remote.length === 0) return; // 無遠端數據，不覆蓋
-      var merged = mergeArray(local, remote, cfg.stateKey);
+      var mergeRes = mergeArrayWithConflicts(local, remote, cfg.stateKey);
+      var merged = mergeRes.merged;
+      if (mergeRes.conflicts.length > 0 && typeof Conflicts !== 'undefined') {
+        Conflicts.record(cfg.stateKey, mergeRes.conflicts);
+      }
 
       // MEMBER_TXS 需要重新計算衍生欄位
       if (cfg.event === EVENTS.MTX_LOADED && typeof calcMemberTx === 'function') {
@@ -2018,6 +2372,7 @@ function _resyncAll() {
       Store.writeArray(cfg.storeKey, merged);
       State.set(cfg.stateKey, merged);
       EventBus.emit(cfg.event, merged);
+      updateSyncBaseline(cfg.stateKey, merged); // v1.6.9 三方比對基準
     }).catch(function(e) {
       console.error('[Watchers] _resyncAll failed for ' + path, e);
     });
@@ -11163,6 +11518,11 @@ var SettingsPage = (function() {
     html += '<div class="form-group" style="align-self:flex-end;"><button class="btn btn-primary" onclick="SettingsPage.addEmployee()">新增</button></div>';
     html += '</div></div></div>';
 
+    // v1.6.9 同步衝突卡片（有衝突才顯示，與 APP 設定頁對齊）
+    if (typeof Conflicts !== 'undefined' && Conflicts.count() > 0) {
+      html += _renderConflictsCard();
+    }
+
     var container = document.getElementById('page-settings');
     if (container) container.innerHTML = html;
     /* 延遲渲染員工表格，確保 DOM 就緒 */
@@ -11308,7 +11668,89 @@ var SettingsPage = (function() {
     renderEmployeeTable();
   }
 
-  return { render: render, saveRate: saveRate, updateHall: updateHall, toggleRebate: toggleRebate, toggleCard: toggleCard, updateTicket: updateTicket, changePwd: changePwd, addEmployee: addEmployee, delEmployee: delEmployee };
+  /* ===== v1.6.9 同步衝突可視化（與 APP 設定頁對齊） ===== */
+  var _COLLECTION_LABELS = {
+    members: '會員', memberTxs: '帳務', trips: '行程(團)', bookings: '訂房',
+    agents: '代理', shareholders: '股東', supplements: '補帳',
+    settings: '系統設定', extraIncome: '額外收入', hotelConfig: '酒店設定',
+    walletTxs: '錢包流水', loans: '借支', pendingExps: '預支開銷', catalog: '商品目錄',
+    auditLog: '審計紀錄',
+  };
+  var _FIELD_LABELS = {
+    id: '編號', name: '名稱', casinoId: '賭場編號', agentId: '代理', shareholderId: '股東',
+    tripId: '所屬團', memberId: '會員', hotel: '酒店', visitDate: '前往日期',
+    washCode: '洗碼', outCode: '出碼', backCode: '回碼', rate: '費率', amount: '金額',
+    guestName: '客人', roomType: '房型', checkIn: '入住日', checkOut: '退房日',
+    type: '類型', note: '備註', notes: '備註', status: '狀態', date: '日期',
+  };
+  function _conflictLabel(v) {
+    if (!v) return '—';
+    if (v.name) return v.name;
+    if (v.hotel) return v.hotel + (v.date ? '（' + v.date + '）' : '');
+    if (v.date) return v.date;
+    return v.id || '';
+  }
+  function _diffSummary(a, b) {
+    if (!a || !b) return '';
+    var keys = {};
+    Object.keys(a).concat(Object.keys(b)).forEach(function(k) { keys[k] = true; });
+    var lines = [];
+    Object.keys(keys).sort().forEach(function(k) {
+      if (k.charAt(0) === '_') return;
+      if (typeof _stableStringify !== 'function') return;
+      if (_stableStringify(a[k]) === _stableStringify(b[k])) return;
+      var label = _FIELD_LABELS[k] || k;
+      function fmt(v) {
+        var s = (v === undefined || v === null || v === '') ? '（空）' : String(v);
+        return s.length > 24 ? s.slice(0, 24) + '…' : s;
+      }
+      lines.push(label + '：本機「' + fmt(a[k]) + '」／雲端「' + fmt(b[k]) + '」');
+    });
+    return lines.slice(0, 6).join('<br>');
+  }
+  function _fmtTime(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  function _renderConflictsCard() {
+    var list = Conflicts.getAll();
+    var html = '<div class="card">';
+    html += '<div class="card-header"><h3>同步衝突</h3></div>';
+    html += '<p style="color:var(--text-secondary);font-size:var(--font-size-sm);margin:0 0 12px 0;">以下資料在同步時偵測到本機與雲端版本不一致，請選擇保留版本。</p>';
+    list.slice().reverse().forEach(function(c) {
+      var colLabel = _COLLECTION_LABELS[c.collection] || c.collection;
+      var winnerTag = c.winner === 'remote' ? '（目前保留雲端）' : '（目前保留本機）';
+      html += '<div style="padding:12px;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:10px;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">';
+      html += '<strong>' + escHtml(colLabel) + '：' + escHtml(_conflictLabel(c.local) || _conflictLabel(c.remote)) + '</strong>';
+      html += '<span style="color:var(--text-secondary);font-size:var(--font-size-sm);">' + escHtml(_fmtTime(c.at)) + winnerTag + '</span></div>';
+      html += '<div style="margin:8px 0;font-size:var(--font-size-sm);color:var(--text-secondary);">' + _diffSummary(c.local, c.remote) + '</div>';
+      html += '<div style="display:flex;gap:8px;">';
+      html += '<button class="btn btn-primary" onclick="SettingsPage.resolveConflict(\'' + c.id + '\',\'local\')">保留本機</button>';
+      html += '<button class="btn btn-primary" onclick="SettingsPage.resolveConflict(\'' + c.id + '\',\'remote\')">保留雲端</button>';
+      html += '</div></div>';
+    });
+    html += '<div style="margin-top:12px;"><button class="btn" onclick="SettingsPage.clearConflicts()">全部忽略（保留目前版本）</button></div>';
+    html += '</div>';
+    return html;
+  }
+  function resolveConflict(id, choice) {
+    Modal.confirm('確定「保留' + (choice === 'local' ? '本機' : '雲端') + '」版本？', function() {
+      Conflicts.resolve(id, choice);
+      Toast.success('衝突已解決');
+      render();
+    });
+  }
+  function clearConflicts() {
+    Modal.confirm('忽略所有衝突（保留目前版本，不再提示）？', function() {
+      Conflicts.clearAll();
+      Toast.success('已清除全部衝突記錄');
+      render();
+    });
+  }
+
+  return { render: render, saveRate: saveRate, updateHall: updateHall, toggleRebate: toggleRebate, toggleCard: toggleCard, updateTicket: updateTicket, changePwd: changePwd, addEmployee: addEmployee, delEmployee: delEmployee, resolveConflict: resolveConflict, clearConflicts: clearConflicts };
 })();
 
 
@@ -11459,6 +11901,19 @@ function initApp() {
 
   // 2. 加载本地数据
   loadAllData();
+
+  /* v1.6.9 同步衝突：初始化清理過期記錄 + 偵測到衝突時 Toast 提示（與 APP 一致） */
+  try {
+    if (typeof Conflicts !== 'undefined') {
+      Conflicts.prune();
+      Conflicts.pruneFalsePositives();
+    }
+  } catch(e) { console.error('[App] Conflicts init', e); }
+  EventBus.on(EVENTS.SYNC_CONFLICT, function(info) {
+    if (info && info.count > 0) {
+      Toast.warning('偵測到 ' + info.count + ' 筆同步衝突（' + (info.collection || '') + '），請至系統設定頁查看');
+    }
+  });
 
   // 3. 键盘快捷键
   Keyboard.init();
