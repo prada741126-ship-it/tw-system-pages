@@ -11076,13 +11076,14 @@ var WalletPage = (function() {
   }
 
   function typeOptions(selected, manualOnly) {
-    /* 與 typeName 同源（APP 業務風格） — 補登/編輯 walletTxs 表單用 */
+    /* 與 typeName 同源（APP 業務風格） — 補登/編輯 walletTxs 表單用
+       v1.7.13 簡化：去掉「開帳（舊）」與「借支回收（舊）」多餘區分（舊型別不再使用）；保留單一選項 */
     var manual = [
-      ['open', '開帳'], ['opening', '開帳（舊）'], ['deposit', '補登'], ['adjust', '調整'], ['manual', '手動補登'],
+      ['open', '開帳'], ['deposit', '補登'], ['adjust', '調整'], ['manual', '手動補登'],
     ];
     var derived = [
       ['member_tx', '現金碼衍生'], ['credit_tx', '信用碼超贏衍生'], ['pexp', '預支開銷衍生'],
-      ['loan', '借支衍生'], ['loan_repay', '借支回收衍生'], ['repay', '借支回收（舊）'], ['payout', '開銷墊付'],
+      ['loan', '借支衍生'], ['loan_repay', '借支回收衍生'], ['payout', '開銷墊付'],
       ['expense', '開銷實支衍生'],
     ];
     var list = manualOnly ? manual : manual.concat(derived);
@@ -11357,6 +11358,9 @@ var WalletPage = (function() {
   }
 
   /* ===== 錢包流水 CRUD ===== */
+  /* v1.7.13：手動類型（開帳/補登/調整/手動補登）非借支/非衍生，無需關聯團；
+     衍生類型（借支/loan/pexp/expense 等）才需要團欄位。類型變動時動態顯示/隱藏。 */
+  var TRIP_REQUIRED_TYPES = { 'member_tx': 1, 'credit_tx': 1, 'pexp': 1, 'loan': 1, 'loan_repay': 1, 'payout': 1, 'expense': 1 };
   function _walletTxForm(item) {
     var w = item || {};
     var derived = item ? WalletTxs.isDerived(item) : false;
@@ -11369,13 +11373,14 @@ var WalletPage = (function() {
     }
     html += '<div class="form-row">';
     html += '<div class="form-group"><label>日期</label><input type="date" id="wtx-date" class="form-input" value="' + escHtml(w.date || todayStr()) + '"></div>';
-    html += '<div class="form-group"><label>類型</label><select id="wtx-type" class="form-input">' + typeOptions(w.type, !derived) + '</select></div>';
+    html += '<div class="form-group"><label>類型</label><select id="wtx-type" class="form-input" onchange="WalletPage.onTypeChange(this)">' + typeOptions(w.type, !derived) + '</select></div>';
     html += '</div>';
     html += '<div class="form-row">';
     html += '<div class="form-group"><label>金額(HK$)</label><input type="number" id="wtx-amount" class="form-input" value="' + (w.amountHKD != null ? w.amountHKD : '') + '" step="1" placeholder="正數流入/負數流出"></div>';
     html += '<div class="form-group"><label>會員</label><select id="wtx-member" class="form-input">' + memberOptions(w.memberId) + '</select></div>';
     html += '</div>';
-    html += '<div class="form-row">';
+    var showTrip = !!TRIP_REQUIRED_TYPES[w.type];
+    html += '<div class="form-row" id="wtx-trip-row"' + (showTrip ? '' : ' style="display:none;"') + '>';
     html += '<div class="form-group"><label>團</label><select id="wtx-trip" class="form-input">' + tripOptions(w.tripId) + '</select></div>';
     html += '<div class="form-group"><label>備註</label><input type="text" id="wtx-note" class="form-input" value="' + escHtml(w.note || '') + '"></div>';
     html += '</div>';
@@ -11384,6 +11389,11 @@ var WalletPage = (function() {
     html += '<button class="btn btn-primary" id="wtx-save-btn">儲存</button>';
     html += '</div>';
     return html;
+  }
+  function onTypeChange(sel) {
+    var t = sel.value;
+    var row = document.getElementById('wtx-trip-row');
+    if (row) row.style.display = TRIP_REQUIRED_TYPES[t] ? '' : 'none';
   }
 
   function showAddWalletTx() {
@@ -11901,6 +11911,7 @@ var WalletPage = (function() {
     showCatalog: showCatalog,
     saveCatalogItem: saveCatalogItem,
     deleteCatalogItem: deleteCatalogItem,
+    onTypeChange: onTypeChange, // v1.7.13 類型變動時動態顯示/隱藏團欄位
   };
 })();
 
